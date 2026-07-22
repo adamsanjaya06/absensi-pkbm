@@ -248,7 +248,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     // Fetch server time for payload
     const st = await getServerTimeRealtime();
 
-    const isFaceValid = faceRes.detected && faceRes.score >= 60;
+    const isFaceValid = user.faceRegistered && faceRes.detected && faceRes.score >= 60;
     const isSuccess = geoRes.isWithinRadius && isFaceValid;
     setHudStatus(isSuccess ? 'success' : 'failed');
 
@@ -267,22 +267,14 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
       keterangan = 'Absen Pulang Normal';
     }
 
-    if (!faceRes.detected) {
+    if (!user.faceRegistered) {
+      keterangan = 'Gagal: Wajah belum terdaftar. Lakukan Registrasi Wajah AI terlebih dahulu di portal.';
+    } else if (!faceRes.detected) {
       keterangan = `Gagal: Wajah tidak terdeteksi oleh kamera AI (${faceRes.message})`;
     } else if (faceRes.score < 60) {
       keterangan = `Gagal: Verifikasi biometrik wajah ditolak (${faceRes.score}% < 60%)`;
     } else if (!geoRes.isWithinRadius) {
       keterangan = `Gagal: Di luar radius lokasi kantor (${geoRes.distanceMeters}m > ${geoRes.officeRadiusMeters}m)`;
-    }
-
-    // Auto save initial biometric descriptor if first registration
-    if (isSuccess && faceRes.isNewRegistration && faceRes.descriptor) {
-      const updatedUser: User = {
-        ...user,
-        faceDescriptor: faceRes.descriptor,
-        faceRegistered: true,
-      };
-      saveUser(updatedUser);
     }
 
     const newRecord: AttendanceRecord = {
@@ -326,8 +318,10 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
         saveAttendanceRecord(newRecord); // save audit log
         setVerifyResult({
           status: 'gagal',
-          message: !faceRes.detected
-            ? 'Absen Ditolak: Wajah Tidak Terdeteksi!'
+          message: !user.faceRegistered
+            ? 'Absen Ditolak: Wajah Belum Terdaftar!'
+            : !faceRes.detected
+            ? 'Absen Ditolak: Wajah Tidak Terdeteksi Pada Kamera!'
             : faceRes.score < 60
             ? 'Absen Ditolak: Biometrik Wajah Tidak Cocok!'
             : 'Absen Ditolak: Di Luar Radius Kantor!',

@@ -1,7 +1,7 @@
 import { FaceDetectionResult } from '../types';
 
 /**
- * Extracts a normalized 16-dimensional facial feature vector and checks for face presence
+ * Extracts a normalized 25-dimensional Z-score facial feature vector with detection checks
  */
 export function extractFaceDescriptorFromCanvas(canvas: HTMLCanvasElement): number[] {
   const res = extractFaceDescriptorWithDetection(canvas);
@@ -15,24 +15,32 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): {
 } {
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    return { descriptor: new Array(16).fill(0.5), detected: false, reason: 'Kamera tidak dapat membaca piksel.' };
+    return { descriptor: new Array(25).fill(0), detected: false, reason: 'Kamera tidak dapat membaca piksel.' };
   }
 
   const { width, height } = canvas;
   if (!width || !height) {
-    return { descriptor: new Array(16).fill(0.5), detected: false, reason: 'Canvas video belum siap.' };
+    return { descriptor: new Array(25).fill(0), detected: false, reason: 'Canvas video belum siap.' };
   }
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Divide canvas into 4x4 grid zones to calculate spatial luminance
-  const descriptor: number[] = [];
-  const gridRows = 4;
-  const gridCols = 4;
-  const cellWidth = Math.floor(width / gridCols);
-  const cellHeight = Math.floor(height / gridRows);
+  // Focus face analysis on central 70% ellipse region of canvas
+  const startX = Math.floor(width * 0.15);
+  const endX = Math.floor(width * 0.85);
+  const startY = Math.floor(height * 0.10);
+  const endY = Math.floor(height * 0.90);
 
+  const regionW = endX - startX;
+  const regionH = endY - startY;
+
+  const gridRows = 5;
+  const gridCols = 5;
+  const cellWidth = Math.floor(regionW / gridCols);
+  const cellHeight = Math.floor(regionH / gridRows);
+
+  const rawLuminances: number[] = [];
   let totalLuminanceSum = 0;
 
   for (let r = 0; r < gridRows; r++) {
@@ -42,8 +50,11 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): {
       let totalB = 0;
       let pixelCount = 0;
 
-      for (let y = r * cellHeight; y < (r + 1) * cellHeight; y += 3) {
-        for (let x = c * cellWidth; x < (c + 1) * cellWidth; x += 3) {
+      const cLeft = startX + c * cellWidth;
+      const rTop = startY + r * cellHeight;
+
+      for (let y = rTop; y < rTop + cellHeight; y += 2) {
+        for (let x = cLeft; x < cLeft + cellWidth; x += 2) {
           const idx = (y * width + x) * 4;
           totalR += data[idx];
           totalG += data[idx + 1];
@@ -54,34 +65,55 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): {
 
       const avgLuminance =
         pixelCount > 0 ? (0.299 * totalR + 0.587 * totalG + 0.114 * totalB) / (pixelCount * 255) : 0.5;
-      descriptor.push(Number(avgLuminance.toFixed(4)));
+      rawLuminances.push(avgLuminance);
       totalLuminanceSum += avgLuminance;
     }
   }
 
-  // Check face presence via spatial variance across grid cells
-  const meanLuminance = totalLuminanceSum / 16;
-  let varianceSum = 0;
-  for (let i = 0; i < 16; i++) {
-    varianceSum += Math.pow(descriptor[i] - meanLuminance, 2);
-  }
-  const variance = varianceSum / 16;
+  const meanLuminance = totalLuminanceSum / 25;
 
-  if (meanLuminance < 0.06) {
-    return { descriptor, detected: false, reason: 'Kamera terlalu gelap / tertutup. Pastikan pencahayaan cukup.' };
+  // Calculate spatial variance across 25 grid cells
+  let varianceSum = 0;
+  for (let i = 0; i < 25; i++) {
+    varianceSum += Math.pow(rawLuminances[i] - meanLuminance, 2);
   }
-  if (meanLuminance > 0.94) {
-    return { descriptor, detected: false, reason: 'Kamera silau / overexposed.' };
+  const variance = varianceSum / 25;
+  const stdDev = Math.sqrt(variance);
+
+  if (meanLuminance < 0.08) {
+    return {
+      descriptor: new Array(25).fill(0),
+      detected: false,
+      reason: 'Kamera terlalu gelap / tertutup. Pastikan pencahayaan ruangan cukup.',
+    };
   }
-  if (variance < 0.0003) {
-    return { descriptor, detected: false, reason: 'Wajah tidak terdeteksi. Tidak ditemukan pola fitur wajah pada area kamera.' };
+
+  if (meanLuminance > 0.92) {
+    return {
+      descriptor: new Array(25).fill(0),
+      detected: false,
+      reason: 'Kamera silau / overexposed.',
+    };
   }
+
+  if (variance < 0.00035) {
+    return {
+      descriptor: new Array(25).fill(0),
+      detected: false,
+      reason: 'Wajah tidak terdeteksi pada kamera! Pastikan wajah Anda terlihat jelas pada area lingkaran panduan.',
+    };
+  }
+
+  // Z-score normalize facial vector so features are invariant to global room lighting
+  const descriptor: number[] = rawLuminances.map((val) =>
+    Number(((val - meanLuminance) / (stdDev + 0.001)).toFixed(4))
+  );
 
   return { descriptor, detected: true };
 }
 
 /**
- * Generates a mock or default registered descriptor for seed users
+ * Generates a normalized fallback descriptor for seed data
  */
 export function generateSeedFaceDescriptor(seed: string): number[] {
   let hash = 0;
@@ -90,16 +122,25 @@ export function generateSeedFaceDescriptor(seed: string): number[] {
     hash |= 0;
   }
 
-  const descriptor: number[] = [];
-  for (let i = 0; i < 16; i++) {
+  const raw: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < 25; i++) {
     const val = (Math.sin(hash + i * 1.7) + 1) / 2;
-    descriptor.push(Number(val.toFixed(4)));
+    raw.push(val);
+    sum += val;
   }
-  return descriptor;
+  const mean = sum / 25;
+  let varSum = 0;
+  for (let i = 0; i < 25; i++) {
+    varSum += Math.pow(raw[i] - mean, 2);
+  }
+  const std = Math.sqrt(varSum / 25) || 1;
+
+  return raw.map((v) => Number(((v - mean) / std).toFixed(4)));
 }
 
 /**
- * Compares two 16-element face descriptors and returns similarity score (0 - 100%)
+ * Compares two normalized facial descriptors and returns similarity percentage (0 - 99%)
  */
 export function compareDescriptors(desc1: number[], desc2: number[]): number {
   if (!desc1 || !desc2 || desc1.length === 0 || desc2.length === 0) {
@@ -107,34 +148,26 @@ export function compareDescriptors(desc1: number[], desc2: number[]): number {
   }
 
   const len = Math.min(desc1.length, desc2.length);
-  let mean1 = 0;
-  let mean2 = 0;
-
-  for (let i = 0; i < len; i++) {
-    mean1 += desc1[i];
-    mean2 += desc2[i];
-  }
-  mean1 /= len;
-  mean2 /= len;
-
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;
 
   for (let i = 0; i < len; i++) {
-    const diff1 = desc1[i] - mean1;
-    const diff2 = desc2[i] - mean2;
-    dotProduct += diff1 * diff2;
-    normA += diff1 * diff1;
-    normB += diff2 * diff2;
+    dotProduct += desc1[i] * desc2[i];
+    normA += desc1[i] * desc1[i];
+    normB += desc2[i] * desc2[i];
   }
 
   if (normA === 0 || normB === 0) return 0;
 
   const correlation = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+
   let score = 0;
-  if (correlation >= 0) {
-    score = Math.round(correlation * 100);
+  if (correlation >= 0.40) {
+    // High structural correlation (same person)
+    score = Math.round(75 + (correlation - 0.40) * 40);
+  } else if (correlation >= 0) {
+    score = Math.round(correlation * 125);
   } else {
     score = Math.max(0, Math.round((correlation + 1) * 20));
   }
@@ -156,25 +189,27 @@ export function verifyFaceAgainstRegistered(
     return {
       detected: false,
       score: 0,
-      message: extraction.reason || 'Wajah tidak terdeteksi pada kamera! Pastikan wajah Anda terlihat di dalam lingkaran panduan.',
+      message:
+        extraction.reason ||
+        'Wajah tidak terdeteksi pada kamera! Pastikan wajah Anda terlihat di dalam area panduan.',
       descriptor: extraction.descriptor,
     };
   }
 
   const liveDescriptor = extraction.descriptor;
 
-  if (!registeredDescriptor || registeredDescriptor.length === 0 || !isRegistered) {
+  if (!isRegistered || !registeredDescriptor || registeredDescriptor.length === 0) {
     return {
       detected: true,
-      score: 92,
-      message: 'Wajah terdeteksi! Biometrik wajah pertama berhasil diregistrasi.',
+      score: 0,
+      message:
+        'Absen Ditolak: Biometrik wajah belum terdaftar! Silakan daftarkan biometrik wajah Anda (1x) terlebih dahulu pada menu portal.',
       descriptor: liveDescriptor,
-      isNewRegistration: true,
     };
   }
 
   const matchScore = compareDescriptors(liveDescriptor, registeredDescriptor);
-  const threshold = 60; // Minimum 60% similarity required for pass
+  const threshold = 60; // Minimum 60% similarity required to pass
 
   if (matchScore >= threshold) {
     return {
