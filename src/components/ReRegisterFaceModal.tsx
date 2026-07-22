@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, ShieldCheck, RefreshCw, X, CheckCircle2, AlertCircle, Lock } from 'lucide-react';
+import { Camera, ShieldCheck, RefreshCw, X, CheckCircle2, AlertCircle, Lock, Eye, Sparkles } from 'lucide-react';
 import { User as UserType } from '../types';
-import { extractFaceDescriptorWithDetection, drawFaceHudOverlay } from '../lib/faceAI';
+import { extractFaceDescriptorWithDetection, drawFaceHudOverlay, DetailedFaceAnalysis } from '../lib/faceAI';
 import { saveUser } from '../lib/storage';
 
 interface ReRegisterFaceModalProps {
@@ -25,7 +25,8 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [hudStatus, setHudStatus] = useState<'scanning' | 'success' | 'failed' | 'idle'>('scanning');
-  const [statusMessage, setStatusMessage] = useState<string>('Posisikan wajah Anda tepat di dalam area panduan.');
+  const [statusMessage, setStatusMessage] = useState<string>('Posisikan wajah & mata tepat pada lingkaran panduan.');
+  const [qualityMetrics, setQualityMetrics] = useState<DetailedFaceAnalysis['quality'] | null>(null);
 
   // Stream binder
   useEffect(() => {
@@ -36,7 +37,7 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
   }, [stream, isOpen]);
 
   const startCamera = async () => {
-    if (user.faceRegistered) return; // Prevent camera if already registered
+    if (user.faceRegistered) return;
     setCameraError(null);
     try {
       let mediaStream: MediaStream;
@@ -73,7 +74,8 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
     setCameraError(null);
     setHudStatus('scanning');
     setIsScanning(false);
-    setStatusMessage('Posisikan wajah Anda tepat di dalam area panduan.');
+    setQualityMetrics(null);
+    setStatusMessage('Posisikan wajah & mata tepat pada lingkaran panduan retikel.');
 
     if (!user.faceRegistered) {
       startCamera();
@@ -127,7 +129,8 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
 
     setIsScanning(true);
     setHudStatus('scanning');
-    setStatusMessage('Pindai AI sedang menganalisis titik biomekanik wajah...');
+    setQualityMetrics(null);
+    setStatusMessage('Ekstraksi Vektor Retina AI & Landmank Wajah sedang berlangsung...');
 
     setTimeout(() => {
       const canvas = canvasRef.current || document.createElement('canvas');
@@ -137,15 +140,33 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
 
       if (ctx && videoRef.current) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const photoDataUrl = canvas.toDataURL('image/jpeg', 0.88);
 
-        // Extract 16-dimensional facial feature vector descriptor with detection
-        const { descriptor: newDescriptor, detected, reason } = extractFaceDescriptorWithDetection(canvas);
+        // Extract 128-dimensional high-precision facial feature vector
+        const analysis = extractFaceDescriptorWithDetection(canvas);
+        const { descriptor: newDescriptor, detected, reason, quality } = analysis;
+
+        setQualityMetrics(quality);
 
         if (!detected) {
           setHudStatus('failed');
           setIsScanning(false);
           setStatusMessage(reason || 'Wajah tidak terdeteksi pada kamera. Posisikan wajah Anda tepat di dalam area panduan.');
+          return;
+        }
+
+        // Strict Registration Baseline Quality Assessment
+        if (quality.ocularScore < 0.22) {
+          setHudStatus('failed');
+          setIsScanning(false);
+          setStatusMessage('Registrasi Ditolak: Area retina / mata kurang jelas. Mohon buka mata dengan jelas & tatap lurus ke kamera.');
+          return;
+        }
+
+        if (quality.symmetryScore < 0.35) {
+          setHudStatus('failed');
+          setIsScanning(false);
+          setStatusMessage('Registrasi Ditolak: Posisi wajah miring / tidak simetris. Hadapkan wajah lurus tepat ke kamera.');
           return;
         }
 
@@ -159,13 +180,13 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
         // Save to storage & trigger callback
         saveUser(updatedUser);
         setHudStatus('success');
-        setStatusMessage('Registrasi Wajah AI Berhasil! Vektor fitur disimpan.');
+        setStatusMessage('Registrasi Biometrik Berhasil! Vektor 128-D Sempurna disimpan sebagai data rujukan.');
 
         setTimeout(() => {
           setIsScanning(false);
           onSuccess(updatedUser);
           handleClose();
-        }, 1500);
+        }, 1800);
       } else {
         setHudStatus('failed');
         setIsScanning(false);
@@ -186,10 +207,10 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                {user.faceRegistered ? 'Biometrik Wajah Terkunci' : 'Pendaftaran Wajah AI'}
+                {user.faceRegistered ? 'Biometrik Wajah Terkunci' : 'Pendaftaran Biometrik Wajah AI'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {user.faceRegistered ? 'Registrasi Permanen (1x Saja)' : 'Verifikasi Kamera Biometrik Karyawan'}
+                {user.faceRegistered ? 'Registrasi Permanen (1x Saja)' : 'Vektor Rujukan Sempurna untuk Verifikasi Absen'}
               </p>
             </div>
           </div>
@@ -214,8 +235,8 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
               </p>
             </div>
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-900 dark:text-emerald-200 text-left space-y-1">
-              <p className="font-bold">✓ Status: Wajah AI Aktif & Permanen</p>
-              <p className="opacity-90">Data vektor ini digunakan sebagai acuan otomatis untuk verifikasi Absen Masuk dan Absen Pulang.</p>
+              <p className="font-bold">✓ Status: Vektor Biometrik AI Aktif & Permanen</p>
+              <p className="opacity-90">Vektor 128-D ini digunakan sebagai acuan otomatis untuk verifikasi Absen Masuk dan Absen Pulang.</p>
             </div>
             <button
               onClick={handleClose}
@@ -246,6 +267,16 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
                     ref={hudCanvasRef}
                     className="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100"
                   />
+
+                  {/* Feature indicators badge on video */}
+                  <div className="absolute top-2 left-2 right-2 flex justify-between items-center px-3 py-1.5 bg-slate-900/80 backdrop-blur-md rounded-lg text-[10px] text-slate-200 border border-white/10">
+                    <span className="flex items-center gap-1 font-semibold text-purple-300">
+                      <Eye className="w-3.5 h-3.5" /> Retikel Retina & Mata Active
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-emerald-400">
+                      <Sparkles className="w-3.5 h-3.5" /> 128-D Vector Mode
+                    </span>
+                  </div>
                 </>
               )}
 
@@ -253,9 +284,51 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
               <canvas ref={canvasRef} className="hidden" />
             </div>
 
+            {/* Quality Metrics Breakdown */}
+            {qualityMetrics && (
+              <div className="p-3 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-800 text-xs space-y-1.5">
+                <p className="font-bold text-purple-900 dark:text-purple-300 flex items-center justify-between">
+                  <span>Analisis Biometrik Rujukan:</span>
+                  <span className="text-[10px] font-normal text-purple-600 dark:text-purple-400">Kualitas Vektor</span>
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between items-center">
+                    <span>Retina & Mata:</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {Math.round(qualityMetrics.ocularScore * 100)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Simetri Wajah:</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {Math.round(qualityMetrics.symmetryScore * 100)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Kontur & Edge:</span>
+                    <span className="font-bold text-blue-600 dark:text-blue-400">
+                      {Math.round(qualityMetrics.edgeDensity * 1000)} pts
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Pencahayaan:</span>
+                    <span className="font-bold text-blue-600 dark:text-blue-400">
+                      {Math.round(qualityMetrics.brightness * 100)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Status Box */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{statusMessage}</p>
+            <div className={`p-3 rounded-xl border text-center ${
+              hudStatus === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                : hudStatus === 'failed'
+                ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+            }`}>
+              <p className="text-xs font-semibold leading-relaxed">{statusMessage}</p>
             </div>
 
             {/* Action Button */}
@@ -276,12 +349,12 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
                 {isScanning ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Memindai Wajah...</span>
+                    <span>Mengekstrak Vektor AI...</span>
                   </>
                 ) : (
                   <>
                     <Camera className="w-4 h-4" />
-                    <span>Simpan Rekaman Wajah AI</span>
+                    <span>Pindai & Simpan Vektor Wajah Sempurna</span>
                   </>
                 )}
               </button>

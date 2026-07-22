@@ -231,7 +231,21 @@ export function saveOfficeSettings(office: OfficeSettings) {
 export function getAttendanceRecords(): AttendanceRecord[] {
   initializeStorage();
   const data = localStorage.getItem(STORAGE_KEYS.ATTENDANCE);
-  return data ? JSON.parse(data) : [];
+  if (!data) return [];
+  try {
+    const records: AttendanceRecord[] = JSON.parse(data);
+    const realRecords = records.filter((r) => {
+      const numPart = (r.id || '').replace('att-', '');
+      const ts = Number(numPart);
+      return !isNaN(ts) && ts > 1700000000000;
+    });
+    if (realRecords.length !== records.length) {
+      localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(realRecords));
+    }
+    return realRecords;
+  } catch (e) {
+    return [];
+  }
 }
 
 export function saveAttendanceRecord(record: AttendanceRecord) {

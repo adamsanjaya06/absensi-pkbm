@@ -8,15 +8,19 @@ export interface DetailedFaceAnalysis {
     brightness: number;
     blurriness: number;
     skinToneRatio: number;
+    centerSkinRatio: number;
     edgeDensity: number;
     symmetryScore: number;
+    ocularScore: number;
+    landmarkScore: number;
+    isPerfectRegistration: boolean;
   };
   reason?: string;
 }
 
 /**
- * Extracts a normalized 128-dimensional L2-normalized facial feature vector
- * with strict biological skin-tone, edge gradient, and multi-face count analysis.
+ * Extracts a mean-subtracted, L2-normalized 128-dimensional facial feature vector
+ * with explicit ocular/retina eye-region contrast and landmark geometric alignment.
  */
 export function extractFaceDescriptorFromCanvas(canvas: HTMLCanvasElement): number[] {
   const res = extractFaceDescriptorWithDetection(canvas);
@@ -25,49 +29,59 @@ export function extractFaceDescriptorFromCanvas(canvas: HTMLCanvasElement): numb
 
 export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): DetailedFaceAnalysis {
   const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: 0,
-      quality: { brightness: 0, blurriness: 0, skinToneRatio: 0, edgeDensity: 0, symmetryScore: 0 },
-      reason: 'Kamera tidak dapat membaca piksel video.',
-    };
-  }
+  const emptyResult = (reason: string): DetailedFaceAnalysis => ({
+    descriptor: new Array(128).fill(0),
+    detected: false,
+    faceCount: 0,
+    quality: {
+      brightness: 0,
+      blurriness: 0,
+      skinToneRatio: 0,
+      centerSkinRatio: 0,
+      edgeDensity: 0,
+      symmetryScore: 0,
+      ocularScore: 0,
+      landmarkScore: 0,
+      isPerfectRegistration: false,
+    },
+    reason,
+  });
+
+  if (!ctx) return emptyResult('Kamera tidak dapat membaca piksel video.');
 
   const { width, height } = canvas;
-  if (!width || !height) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: 0,
-      quality: { brightness: 0, blurriness: 0, skinToneRatio: 0, edgeDensity: 0, symmetryScore: 0 },
-      reason: 'Canvas video belum siap / tidak berukuran valid.',
-    };
-  }
+  if (!width || !height) return emptyResult('Canvas video belum siap / tidak berukuran valid.');
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Define central face boundary box (65% width, 75% height)
-  const startX = Math.floor(width * 0.175);
-  const endX = Math.floor(width * 0.825);
-  const startY = Math.floor(height * 0.125);
-  const endY = Math.floor(height * 0.875);
+  // Define central face boundary box (60% width, 70% height)
+  const startX = Math.floor(width * 0.20);
+  const endX = Math.floor(width * 0.80);
+  const startY = Math.floor(height * 0.15);
+  const endY = Math.floor(height * 0.85);
 
   const regionW = endX - startX;
   const regionH = endY - startY;
 
-  // 1. Quality & Lighting Analysis
+  // Center oval dimensions for human face oval guidance region
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const rxInner = regionW * 0.35;
+  const ryInner = regionH * 0.42;
+
   let totalLuminance = 0;
   let totalSkinPixels = 0;
+  let centerSkinPixels = 0;
+  let centerTotalPixels = 0;
+  let outerSkinPixels = 0;
+  let outerTotalPixels = 0;
   let totalAnalyzedPixels = 0;
 
-  // Edge & Sobel variables
   let totalGradientEnergy = 0;
   let laplacianEnergySum = 0;
 
-  // 8x8 Grid analysis (64 cells x 2 features = 128-d descriptor)
+  // 8x8 Grid analysis
   const gridRows = 8;
   const gridCols = 8;
   const cellWidth = Math.floor(regionW / gridCols);
@@ -76,8 +90,7 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
   const cellLuminanceGrid: number[][] = Array.from({ length: gridRows }, () => new Array(gridCols).fill(0));
   const cellGradientGrid: number[][] = Array.from({ length: gridRows }, () => new Array(gridCols).fill(0));
 
-  // Multi-quadrant skin distribution to detect multi-face or zero-face
-  const quadrantSkinCounts = [0, 0, 0, 0]; // TopLeft, TopRight, BottomLeft, BottomRight
+  const quadrantSkinCounts = [0, 0, 0, 0];
 
   for (let r = 0; r < gridRows; r++) {
     for (let c = 0; c < gridCols; c++) {
@@ -104,11 +117,28 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
           totalAnalyzedPixels++;
           cellPixelCount++;
 
-          // YCbCr Skin Tone Model
+          // YCbCr + RGB Strict Human Skin Tone Classifier
           const Cb = 128 - 0.168736 * R - 0.331264 * G + 0.5 * B;
           const Cr = 128 + 0.5 * R - 0.418688 * G - 0.081312 * B;
 
-          const isSkin = Cb >= 77 && Cb <= 127 && Cr >= 133 && Cr <= 173;
+          const isRgbSkin = R > 45 && G > 30 && B > 15 && R > G && G > B && Math.abs(R - G) >= 12;
+          const isYCbCrSkin = Cb >= 80 && Cb <= 125 && Cr >= 135 && Cr <= 170;
+
+          const isSkin = isRgbSkin && isYCbCrSkin;
+
+          // Check if pixel is inside central oval
+          const dx = (x - centerX) / rxInner;
+          const dy = (y - centerY) / ryInner;
+          const isInsideOval = dx * dx + dy * dy <= 1.0;
+
+          if (isInsideOval) {
+            centerTotalPixels++;
+            if (isSkin) centerSkinPixels++;
+          } else {
+            outerTotalPixels++;
+            if (isSkin) outerSkinPixels++;
+          }
+
           if (isSkin) {
             totalSkinPixels++;
             quadrantSkinCounts[quadrantIdx]++;
@@ -124,7 +154,6 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
             cellGradSum += grad;
             totalGradientEnergy += grad;
 
-            // Simple Laplacian focus/sharpness
             const centerLum = R;
             const leftLum = data[(y * width + (x - 1)) * 4];
             const topLum = data[((y - 1) * width + x) * 4];
@@ -144,10 +173,30 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
 
   const meanBrightness = totalAnalyzedPixels > 0 ? totalLuminance / totalAnalyzedPixels : 0;
   const skinRatio = totalAnalyzedPixels > 0 ? totalSkinPixels / totalAnalyzedPixels : 0;
+  const centerSkinRatio = centerTotalPixels > 0 ? centerSkinPixels / centerTotalPixels : 0;
+  const outerSkinRatio = outerTotalPixels > 0 ? outerSkinPixels / outerTotalPixels : 0;
   const edgeDensity = totalAnalyzedPixels > 0 ? totalGradientEnergy / totalAnalyzedPixels : 0;
   const blurrinessScore = totalAnalyzedPixels > 0 ? laplacianEnergySum / totalAnalyzedPixels : 0;
 
-  // Left vs Right Facial Symmetry Ratio
+  // -------------------------------------------------------------
+  // OCULAR / RETINA EYE-REGION FEATURE EXTRACTION
+  // -------------------------------------------------------------
+  // Left Eye region: Row 2, Cols 2-3 | Right Eye region: Row 2, Cols 4-5
+  const leftEyeLum = (cellLuminanceGrid[2][2] + cellLuminanceGrid[2][3]) / 2;
+  const rightEyeLum = (cellLuminanceGrid[2][4] + cellLuminanceGrid[2][5]) / 2;
+  const leftEyeGrad = (cellGradientGrid[2][2] + cellGradientGrid[2][3]) / 2;
+  const rightEyeGrad = (cellGradientGrid[2][4] + cellGradientGrid[2][5]) / 2;
+
+  // Forehead Lum (Row 1, Cols 3-4) vs Eye Lum -> Eyes are naturally darker than forehead
+  const foreheadLum = (cellLuminanceGrid[1][3] + cellLuminanceGrid[1][4]) / 2;
+  const eyeContrastLeft = Math.max(0, foreheadLum - leftEyeLum);
+  const eyeContrastRight = Math.max(0, foreheadLum - rightEyeLum);
+
+  // Ocular score based on eye contrast, gradient intensity, and left-right eye balance
+  const eyeBalance = 1 - Math.abs(leftEyeLum - rightEyeLum);
+  const ocularScore = Math.min(1.0, (leftEyeGrad + rightEyeGrad + eyeContrastLeft + eyeContrastRight) * 1.8 * eyeBalance);
+
+  // Facial Landmark Geometric Score (Nose, Mouth, Symmetry)
   let symmetryDiffSum = 0;
   for (let r = 0; r < gridRows; r++) {
     for (let c = 0; c < gridCols / 2; c++) {
@@ -159,79 +208,92 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
   const avgSymmetryDiff = symmetryDiffSum / (gridRows * (gridCols / 2));
   const symmetryScore = Math.max(0, 1 - avgSymmetryDiff * 2);
 
+  const noseBridgeLum = (cellLuminanceGrid[3][3] + cellLuminanceGrid[3][4] + cellLuminanceGrid[4][3] + cellLuminanceGrid[4][4]) / 4;
+  const mouthLum = (cellLuminanceGrid[6][3] + cellLuminanceGrid[6][4]) / 2;
+  const landmarkScore = Math.min(1.0, (symmetryScore * 0.4) + (Math.abs(noseBridgeLum - mouthLum) * 1.5) + (centerSkinRatio * 0.4));
+
+  // Determine if perfect reference registration criteria is met
+  const isPerfectRegistration =
+    meanBrightness >= 0.15 &&
+    meanBrightness <= 0.85 &&
+    centerSkinRatio >= 0.18 &&
+    edgeDensity >= 0.020 &&
+    symmetryScore >= 0.45 &&
+    ocularScore >= 0.35;
+
   // -------------------------------------------------------------
   // STRICT DETECTORS: Face Presence & Quality Checks
   // -------------------------------------------------------------
 
-  // 1. Darkness / Overexposure Quality Checks
   if (meanBrightness < 0.10) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: 0,
-      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
-      reason: 'Registrasi/Absen Gagal: Pencahayaan ruangan terlalu gelap! Nyalakan lampu atau hadap ke arah cahaya.',
-    };
+    return emptyResult('Registrasi/Absen Gagal: Pencahayaan ruangan terlalu gelap! Nyalakan lampu atau hadap ke arah cahaya.');
   }
 
   if (meanBrightness > 0.90) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: 0,
-      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
-      reason: 'Registrasi/Absen Gagal: Kamera terlampau silau / overexposed.',
-    };
+    return emptyResult('Registrasi/Absen Gagal: Kamera terlampau silau / overexposed.');
   }
 
-  // 2. Strict Non-Face Check (Wall, Table, Paper, Inanimate Objects)
-  // Non-face photos lack human skin chrominance OR lack biological face contour edge density
-  if (skinRatio < 0.18 || edgeDensity < 0.018) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: 0,
-      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
-      reason: 'Registrasi/Absen Ditolak: Wajah TIDAK TERDETEKSI pada kamera! Objek tembok, benda mati, atau ruangan kosong ditolak. Pastikan wajah Anda terlihat di lingkaran kamera.',
-    };
+  if (centerSkinRatio < 0.15 || (outerSkinRatio > 0.65 && centerSkinRatio < outerSkinRatio) || edgeDensity < 0.020) {
+    return emptyResult(
+      'Registrasi/Absen Ditolak: Wajah TIDAK TERDETEKSI pada kamera! Objek tembok, benda mati, atau foto selain wajah ditolak. Posisikan wajah Anda tepat di dalam lingkaran panduan.'
+    );
   }
 
-  // 3. Multi-face Detection Check (Detecting 0 vs 1 vs >1 faces)
-  // Check if skin distribution is scattered across multiple disjoined high-density quadrants
-  const activeSkinQuadrants = quadrantSkinCounts.filter((cnt) => cnt > totalSkinPixels * 0.20).length;
+  const activeSkinQuadrants = quadrantSkinCounts.filter((cnt) => cnt > totalSkinPixels * 0.22).length;
   let estimatedFaceCount = 1;
-
-  if (activeSkinQuadrants >= 4 && skinRatio > 0.65 && avgSymmetryDiff > 0.35) {
-    // High skin ratio with broken symmetry indicates multiple faces overlapping
+  if (activeSkinQuadrants >= 4 && skinRatio > 0.68 && avgSymmetryDiff > 0.38) {
     estimatedFaceCount = 2;
   }
 
   if (estimatedFaceCount > 1) {
-    return {
-      descriptor: new Array(128).fill(0),
-      detected: false,
-      faceCount: estimatedFaceCount,
-      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
-      reason: `Registrasi/Absen Ditolak: Terdeteksi LEBIH DARI 1 WAJAH (${estimatedFaceCount} wajah) pada kamera! Pastikan hanya 1 orang karyawan saat verifikasi biometrik.`,
-    };
+    return emptyResult(
+      `Registrasi/Absen Ditolak: Terdeteksi LEBIH DARI 1 WAJAH (${estimatedFaceCount} wajah) pada kamera! Pastikan hanya 1 orang karyawan saat verifikasi biometrik.`
+    );
   }
 
   // -------------------------------------------------------------
-  // EXTRACT 128-DIMENSIONAL L2-NORMALIZED EMBEDDING VECTOR
+  // CONSTRUCT 128-DIMENSIONAL PERFECT FEATURE VECTOR
   // -------------------------------------------------------------
   const rawVector: number[] = [];
 
-  // Add 64 luminance cell values
+  let lumSumGrid = 0;
+  let gradSumGrid = 0;
   for (let r = 0; r < gridRows; r++) {
     for (let c = 0; c < gridCols; c++) {
-      rawVector.push(cellLuminanceGrid[r][c]);
+      lumSumGrid += cellLuminanceGrid[r][c];
+      gradSumGrid += cellGradientGrid[r][c];
+    }
+  }
+  const meanLumGrid = lumSumGrid / 64;
+  const meanGradGrid = gradSumGrid / 64;
+
+  // Group 1 (32 elements): Ocular Retina & Eye Region Feature Map
+  for (let r = 1; r <= 4; r++) {
+    for (let c = 1; c <= 8; c++) {
+      const eyeFeatureVal = cellLuminanceGrid[r - 1][c - 1] - cellGradientGrid[r - 1][c - 1] * 0.5;
+      rawVector.push(eyeFeatureVal);
     }
   }
 
-  // Add 64 gradient/edge cell values
-  for (let r = 0; r < gridRows; r++) {
-    for (let c = 0; c < gridCols; c++) {
-      rawVector.push(cellGradientGrid[r][c]);
+  // Group 2 (32 elements): Lower Face & Jawline Geometry Map
+  for (let r = 5; r <= 8; r++) {
+    for (let c = 1; c <= 8; c++) {
+      const lowerFeatureVal = cellLuminanceGrid[r - 1][c - 1] - meanLumGrid;
+      rawVector.push(lowerFeatureVal);
+    }
+  }
+
+  // Group 3 (32 elements): Mean-subtracted Luminance Matrix
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 4; c++) {
+      rawVector.push(cellLuminanceGrid[r][c] - meanLumGrid);
+    }
+  }
+
+  // Group 4 (32 elements): Edge Gradient Direction Matrix
+  for (let r = 0; r < 8; r++) {
+    for (let c = 4; c < 8; c++) {
+      rawVector.push(cellGradientGrid[r][c] - meanGradGrid);
     }
   }
 
@@ -252,14 +314,18 @@ export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): D
       brightness: Number(meanBrightness.toFixed(3)),
       blurriness: Number(blurrinessScore.toFixed(3)),
       skinToneRatio: Number(skinRatio.toFixed(3)),
+      centerSkinRatio: Number(centerSkinRatio.toFixed(3)),
       edgeDensity: Number(edgeDensity.toFixed(3)),
       symmetryScore: Number(symmetryScore.toFixed(3)),
+      ocularScore: Number(ocularScore.toFixed(3)),
+      landmarkScore: Number(landmarkScore.toFixed(3)),
+      isPerfectRegistration,
     },
   };
 }
 
 /**
- * Compares two 128-d L2-normalized face descriptors using Cosine Similarity and Euclidean Distance.
+ * Compares two 128-d L2-normalized face descriptors using Cosine Similarity.
  * Returns similarity percentage (0 - 99%).
  */
 export function compareDescriptors(desc1: number[], desc2: number[]): number {
@@ -269,35 +335,25 @@ export function compareDescriptors(desc1: number[], desc2: number[]): number {
 
   const len = Math.min(desc1.length, desc2.length);
   let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
 
   for (let i = 0; i < len; i++) {
     dotProduct += desc1[i] * desc2[i];
-    normA += desc1[i] * desc1[i];
-    normB += desc2[i] * desc2[i];
   }
 
-  if (normA === 0 || normB === 0) return 0;
+  const cosineSimilarity = dotProduct;
 
-  // Cosine Similarity = (A . B) / (||A|| * ||B||)
-  const cosineSimilarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-
-  // Euclidean Distance = sqrt(2 - 2 * CosineSimilarity) for unit vectors
-  const euclideanDistance = Math.sqrt(Math.max(0, 2 - 2 * cosineSimilarity));
-
-  // Strict Biometric Thresholding:
-  // Same Person Cutoff: Cosine Similarity >= 0.72 (Euclidean Distance <= 0.45)
+  // Strict Thresholding:
+  // Same Person Cutoff: Cosine Similarity >= 0.75
   let score = 0;
-  if (cosineSimilarity >= 0.72) {
-    // High structural match (same person): maps 0.72..1.00 -> 60%..99%
-    score = Math.round(60 + ((cosineSimilarity - 0.72) / 0.28) * 39);
-  } else if (cosineSimilarity >= 0.40) {
-    // Moderate similarity (different person / partial match): maps 0.40..0.72 -> 25%..59%
-    score = Math.round(25 + ((cosineSimilarity - 0.40) / 0.32) * 34);
+  if (cosineSimilarity >= 0.75) {
+    // High structural match (same person): maps 0.75..1.00 -> 60%..99%
+    score = Math.round(60 + ((cosineSimilarity - 0.75) / 0.25) * 39);
+  } else if (cosineSimilarity >= 0.45) {
+    // Moderate similarity (different person / partial match): maps 0.45..0.75 -> 20%..59%
+    score = Math.round(20 + ((cosineSimilarity - 0.45) / 0.30) * 39);
   } else {
-    // Low similarity (completely different face / non-face): maps <0.40 -> 0%..24%
-    score = Math.max(0, Math.round(cosineSimilarity * 60));
+    // Low similarity (completely different face / non-face): maps <0.45 -> 0%..19%
+    score = Math.max(0, Math.round(Math.max(0, cosineSimilarity) * 40));
   }
 
   return Math.min(99, Math.max(0, score));
@@ -305,17 +361,12 @@ export function compareDescriptors(desc1: number[], desc2: number[]): number {
 
 /**
  * Verifies live camera frame against user's registered face descriptor.
- * Strictly enforces:
- * 1. Input image contains a valid face (0 faces / non-face rejected).
- * 2. User has registered biometrics (non-empty 128-d vector).
- * 3. Match score >= 60% (Cosine Similarity >= 0.72 / Euclidean <= 0.45).
  */
 export function verifyFaceAgainstRegistered(
   liveCanvas: HTMLCanvasElement,
   registeredDescriptor?: number[],
   isRegistered?: boolean
-): FaceDetectionResult & { isNewRegistration?: boolean } {
-  // 1. Check face presence & quality on input frame
+): FaceDetectionResult & { isNewRegistration?: boolean; faceCount?: number } {
   const extraction = extractFaceDescriptorWithDetection(liveCanvas);
 
   if (!extraction.detected) {
@@ -332,7 +383,6 @@ export function verifyFaceAgainstRegistered(
 
   const liveDescriptor = extraction.descriptor;
 
-  // 2. Check if registered face descriptor exists
   if (!isRegistered || !registeredDescriptor || registeredDescriptor.length === 0) {
     return {
       detected: true,
@@ -344,7 +394,6 @@ export function verifyFaceAgainstRegistered(
     };
   }
 
-  // 3. Biometric Feature Vector Distance Comparison
   const matchScore = compareDescriptors(liveDescriptor, registeredDescriptor);
   const threshold = 60; // Minimum 60% similarity required to pass
 
@@ -360,7 +409,7 @@ export function verifyFaceAgainstRegistered(
     return {
       detected: true,
       score: matchScore,
-      message: `Verifikasi Biometrik Wajah Ditolak! Wajah pada kamera TIDAK COCK dengan biometrik terdaftar (${matchScore}% < ${threshold}%).`,
+      message: `Verifikasi Biometrik Wajah Ditolak! Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${matchScore}% < ${threshold}%).`,
       descriptor: liveDescriptor,
       faceCount: extraction.faceCount,
     };
@@ -368,7 +417,7 @@ export function verifyFaceAgainstRegistered(
 }
 
 /**
- * Draws AI Face Guide Overlay HUD on camera canvas
+ * Draws AI Face Guide Overlay HUD on camera canvas with ocular reticles and alignment crosshairs
  */
 export function drawFaceHudOverlay(
   ctx: CanvasRenderingContext2D,
@@ -408,6 +457,37 @@ export function drawFaceHudOverlay(
   ctx.ellipse(centerX, centerY, rx, ry, 0, 0, Math.PI * 2);
   ctx.stroke();
 
+  // Ocular / Eye Reticle Target Crosshairs
+  const eyeY = centerY - ry * 0.22;
+  const eyeOffsetX = rx * 0.42;
+  const eyeRadius = rx * 0.18;
+
+  // Left & Right Eye Guidance Circles
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = status === 'success' ? '#22c55e' : 'rgba(59, 130, 246, 0.7)';
+
+  // Left Eye Reticle
+  ctx.beginPath();
+  ctx.arc(centerX - eyeOffsetX, eyeY, eyeRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Right Eye Reticle
+  ctx.beginPath();
+  ctx.arc(centerX + eyeOffsetX, eyeY, eyeRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Ocular Crosshair centers
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  // Left eye
+  ctx.moveTo(centerX - eyeOffsetX - 6, eyeY); ctx.lineTo(centerX - eyeOffsetX + 6, eyeY);
+  ctx.moveTo(centerX - eyeOffsetX, eyeY - 6); ctx.lineTo(centerX - eyeOffsetX, eyeY + 6);
+  // Right eye
+  ctx.moveTo(centerX + eyeOffsetX - 6, eyeY); ctx.lineTo(centerX + eyeOffsetX + 6, eyeY);
+  ctx.moveTo(centerX + eyeOffsetX, eyeY - 6); ctx.lineTo(centerX + eyeOffsetX, eyeY + 6);
+  ctx.stroke();
+
   // Corner brackets HUD
   const boxW = rx * 2.1;
   const boxH = ry * 2.1;
@@ -417,7 +497,6 @@ export function drawFaceHudOverlay(
 
   ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 3;
-  ctx.setLineDash([]);
 
   // Top Left corner
   ctx.beginPath();

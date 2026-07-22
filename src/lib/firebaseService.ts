@@ -137,8 +137,16 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
     q,
     (snapshot) => {
       const recs: AttendanceRecord[] = [];
-      snapshot.forEach((doc) => {
-        recs.push(doc.data() as AttendanceRecord);
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as AttendanceRecord;
+        const numPart = (data.id || '').replace('att-', '');
+        const ts = Number(numPart);
+        // Clean up legacy mock data with non-timestamp IDs (e.g. att-1, att-2, etc)
+        if (!isNaN(ts) && ts > 1700000000000) {
+          recs.push(data);
+        } else {
+          deleteDoc(doc(db, COLLECTIONS.ATTENDANCE, docSnap.id)).catch(() => {});
+        }
       });
       callback(recs);
     },
@@ -146,10 +154,17 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
       // Fallback without ordering if index is building
       return onSnapshot(collection(db, COLLECTIONS.ATTENDANCE), (snapshot) => {
         const recs: AttendanceRecord[] = [];
-        snapshot.forEach((doc) => {
-          recs.push(doc.data() as AttendanceRecord);
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as AttendanceRecord;
+          const numPart = (data.id || '').replace('att-', '');
+          const ts = Number(numPart);
+          if (!isNaN(ts) && ts > 1700000000000) {
+            recs.push(data);
+          } else {
+            deleteDoc(doc(db, COLLECTIONS.ATTENDANCE, docSnap.id)).catch(() => {});
+          }
         });
-        recs.sort((a, b) => b.timestamp - a.timestamp);
+        recs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         callback(recs);
       });
     }

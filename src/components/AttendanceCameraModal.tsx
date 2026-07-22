@@ -227,6 +227,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     };
 
     setIsVerifying(true);
+    setVerifyResult(null);
     setHudStatus('scanning');
 
     // Snapshot video frame to hidden canvas
@@ -236,6 +237,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
