@@ -17,11 +17,14 @@ import {
   Mail,
   UserCheck,
   Award,
+  Lock,
+  ZoomIn,
 } from 'lucide-react';
 import { User as UserType, OfficeSettings, AttendanceRecord, AttendanceType } from '../types';
 import { getAttendanceRecords, saveUser } from '../lib/storage';
 import { AttendanceCameraModal } from './AttendanceCameraModal';
 import { ReRegisterFaceModal } from './ReRegisterFaceModal';
+import { AttendancePhotoModal } from './AttendancePhotoModal';
 import { isWorkDay } from '../lib/geo';
 
 interface KaryawanPortalProps {
@@ -39,6 +42,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
 }) => {
   const [activeModalType, setActiveModalType] = useState<AttendanceType | null>(null);
   const [isReRegisterModalOpen, setIsReRegisterModalOpen] = useState(false);
+  const [selectedPhotoRecord, setSelectedPhotoRecord] = useState<AttendanceRecord | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getAttendanceRecords());
 
   // Search & Filter state for History
@@ -263,6 +267,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold border-y border-slate-200 dark:border-slate-800">
                 <tr>
+                  <th className="py-3 px-4">Foto Absen</th>
                   <th className="py-3 px-4">Tanggal / Waktu</th>
                   <th className="py-3 px-4 text-center">Jenis</th>
                   <th className="py-3 px-4 text-center">Status</th>
@@ -274,13 +279,29 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredMyRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-8 text-slate-400">
+                    <td colSpan={7} className="text-center py-8 text-slate-400">
                       Belum ada data riwayat absensi yang cocok.
                     </td>
                   </tr>
                 ) : (
                   filteredMyRecords.map((rec) => (
                     <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <button
+                          onClick={() => setSelectedPhotoRecord(rec)}
+                          title="Klik untuk memperbesar foto bukti absen"
+                          className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-xs block focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <img
+                            src={rec.photo}
+                            alt={rec.employeeName}
+                            className="w-10 h-10 object-cover group-hover:scale-110 transition duration-200"
+                          />
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                            <ZoomIn className="w-4 h-4" />
+                          </div>
+                        </button>
+                      </td>
                       <td className="py-3 px-4 font-mono">
                         <div className="font-bold text-slate-800 dark:text-slate-200">{rec.date}</div>
                         <div className="text-[11px] text-blue-600 dark:text-blue-400">{rec.serverTime} WIB</div>
@@ -355,8 +376,8 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
               <div className="pt-2">
                 {currentUser.faceRegistered ? (
                   <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span>Wajah AI Telah Terdaftar</span>
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Wajah AI Terdaftar & Terkunci</span>
                   </div>
                 ) : (
                   <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-300 font-bold flex items-center justify-center gap-2">
@@ -366,13 +387,29 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
                 )}
               </div>
 
-              <button
-                onClick={() => setIsReRegisterModalOpen(true)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow transition active:scale-95"
-              >
-                <Camera className="w-4 h-4" />
-                <span>{currentUser.faceRegistered ? 'Registrasi Ulang Wajah AI' : 'Daftarkan Wajah AI Sekarang'}</span>
-              </button>
+              {currentUser.faceRegistered ? (
+                <div className="space-y-2">
+                  <button
+                    disabled
+                    onClick={() => setIsReRegisterModalOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs rounded-xl border border-slate-300 dark:border-slate-700 cursor-not-allowed"
+                  >
+                    <Lock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Biometrik Wajah Terkunci (1x Saja)</span>
+                  </button>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    Registrasi biometrik wajah hanya dapat dilakukan 1 kali per akun dan tidak dapat diganti demi keamanan verifikasi absen.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsReRegisterModalOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow transition active:scale-95"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Daftarkan Wajah AI Sekarang (1x Saja)</span>
+                </button>
+              )}
             </div>
 
             {/* Right Card: Full Details */}
@@ -460,6 +497,15 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
             onRefreshUser(updatedUser);
             setIsReRegisterModalOpen(false);
           }}
+        />
+      )}
+
+      {/* Photo Enlarge Modal */}
+      {selectedPhotoRecord && (
+        <AttendancePhotoModal
+          isOpen={!!selectedPhotoRecord}
+          record={selectedPhotoRecord}
+          onClose={() => setSelectedPhotoRecord(null)}
         />
       )}
     </div>

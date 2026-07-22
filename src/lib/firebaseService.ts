@@ -232,3 +232,12 @@ export async function saveAttendanceFs(record: AttendanceRecord) {
     console.error('Error saving attendance to Firestore:', e);
   }
 }
+
+export async function deleteAttendanceFs(attendanceId: string) {
+  try {
+    await deleteDoc(doc(db, COLLECTIONS.ATTENDANCE, attendanceId));
+  } catch (e) {
+    console.error('Error deleting attendance from Firestore:', e);
+  }
+}
+

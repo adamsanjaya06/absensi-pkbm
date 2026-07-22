@@ -3,7 +3,7 @@ import { Camera, MapPin, Clock, ShieldCheck, AlertTriangle, RefreshCw, X, CheckC
 import { User, OfficeSettings, AttendanceType, AttendanceRecord } from '../types';
 import { checkGeofenceWithBranches, getAddressFromCoords } from '../lib/geo';
 import { verifyFaceAgainstRegistered, drawFaceHudOverlay } from '../lib/faceAI';
-import { getServerTimeRealtime, saveAttendanceRecord } from '../lib/storage';
+import { getServerTimeRealtime, saveAttendanceRecord, saveUser } from '../lib/storage';
 
 interface AttendanceCameraModalProps {
   user: User;
@@ -240,7 +240,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
     // AI Face Verification against employee registered descriptor
-    const faceRes = verifyFaceAgainstRegistered(canvas, user.faceDescriptor);
+    const faceRes = verifyFaceAgainstRegistered(canvas, user.faceDescriptor, user.faceRegistered);
 
     // Geofence check against all office branches
     const geoRes = checkGeofenceWithBranches(currentLocation.lat, currentLocation.lng, office);
@@ -248,7 +248,8 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     // Fetch server time for payload
     const st = await getServerTimeRealtime();
 
-    const isSuccess = geoRes.isWithinRadius && faceRes.score >= 50;
+    const isFaceValid = faceRes.detected && faceRes.score >= 60;
+    const isSuccess = geoRes.isWithinRadius && isFaceValid;
     setHudStatus(isSuccess ? 'success' : 'failed');
 
     let keterangan = 'Tepat Waktu';
@@ -266,10 +267,22 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
       keterangan = 'Absen Pulang Normal';
     }
 
-    if (!geoRes.isWithinRadius) {
+    if (!faceRes.detected) {
+      keterangan = `Gagal: Wajah tidak terdeteksi oleh kamera AI (${faceRes.message})`;
+    } else if (faceRes.score < 60) {
+      keterangan = `Gagal: Verifikasi biometrik wajah ditolak (${faceRes.score}% < 60%)`;
+    } else if (!geoRes.isWithinRadius) {
       keterangan = `Gagal: Di luar radius lokasi kantor (${geoRes.distanceMeters}m > ${geoRes.officeRadiusMeters}m)`;
-    } else if (faceRes.score < 50) {
-      keterangan = `Gagal: Wajah tidak terverifikasi (${faceRes.score}% < 50%)`;
+    }
+
+    // Auto save initial biometric descriptor if first registration
+    if (isSuccess && faceRes.isNewRegistration && faceRes.descriptor) {
+      const updatedUser: User = {
+        ...user,
+        faceDescriptor: faceRes.descriptor,
+        faceRegistered: true,
+      };
+      saveUser(updatedUser);
     }
 
     const newRecord: AttendanceRecord = {
@@ -285,8 +298,8 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
       serverTime: st.serverTime,
       timestamp: Date.now(),
       photo: photoDataUrl,
-      latitude: location.lat,
-      longitude: location.lng,
+      latitude: currentLocation.lat,
+      longitude: currentLocation.lng,
       address,
       distanceFromOfficeMeters: geoRes.distanceMeters,
       faceMatchScore: faceRes.score,
@@ -310,10 +323,14 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
           handleCloseModal();
         }, 1800);
       } else {
-        saveAttendanceRecord(newRecord); // save failed attempt log as required
+        saveAttendanceRecord(newRecord); // save audit log
         setVerifyResult({
           status: 'gagal',
-          message: `Absen Ditolak Sistem!`,
+          message: !faceRes.detected
+            ? 'Absen Ditolak: Wajah Tidak Terdeteksi!'
+            : faceRes.score < 60
+            ? 'Absen Ditolak: Biometrik Wajah Tidak Cocok!'
+            : 'Absen Ditolak: Di Luar Radius Kantor!',
           faceMatchScore: faceRes.score,
           keterangan,
         });

@@ -30,6 +30,7 @@ import {
   deletePositionFs,
   saveOfficeSettingsFs,
   saveAttendanceFs,
+  deleteAttendanceFs,
 } from './firebaseService';
 
 const STORAGE_KEYS = {
@@ -239,6 +240,25 @@ export function saveAttendanceRecord(record: AttendanceRecord) {
   localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(records));
   saveAttendanceFs(record);
   return record;
+}
+
+export function updateAttendanceRecord(record: AttendanceRecord): AttendanceRecord {
+  const records = getAttendanceRecords();
+  const idx = records.findIndex((r) => r.id === record.id);
+  if (idx >= 0) {
+    records[idx] = record;
+  } else {
+    records.unshift(record);
+  }
+  localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(records));
+  saveAttendanceFs(record);
+  return record;
+}
+
+export function deleteAttendanceRecord(id: string) {
+  const records = getAttendanceRecords().filter((r) => r.id !== id);
+  localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(records));
+  deleteAttendanceFs(id);
 }
 
 // Server Time Fetcher

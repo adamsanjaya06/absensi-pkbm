@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Users,
   UserCheck,
@@ -11,6 +11,12 @@ import {
   AlertCircle,
   Calendar,
   Sparkles,
+  Pencil,
+  Trash2,
+  X,
+  Save,
+  AlertTriangle,
+  ZoomIn,
 } from 'lucide-react';
 import { OfficeSettings, AttendanceRecord } from '../types';
 import {
@@ -19,8 +25,11 @@ import {
   getMonthlyTrendData,
   getAttendanceRecords,
   getUsers,
+  updateAttendanceRecord,
+  deleteAttendanceRecord,
 } from '../lib/storage';
 import { InteractiveMap } from './InteractiveMap';
+import { AttendancePhotoModal } from './AttendancePhotoModal';
 
 interface DashboardAdminProps {
   office: OfficeSettings;
@@ -33,11 +42,33 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   onNavigateRecap,
   onNavigateEmployees,
 }) => {
+  const [records, setRecords] = useState<AttendanceRecord[]>(getAttendanceRecords());
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+  const [deletingRecord, setDeletingRecord] = useState<AttendanceRecord | null>(null);
+  const [selectedPhotoRecord, setSelectedPhotoRecord] = useState<AttendanceRecord | null>(null);
+
+  const refreshData = () => {
+    setRecords(getAttendanceRecords());
+  };
+
   const stats = getDashboardStats();
   const weeklyData = getWeeklyTrendData();
   const monthlyData = getMonthlyTrendData();
-  const records = getAttendanceRecords();
   const recentRecords = records.slice(0, 8); // Top 8 recent clock ins/outs
+
+  const handleSaveEdit = () => {
+    if (!editingRecord) return;
+    updateAttendanceRecord(editingRecord);
+    refreshData();
+    setEditingRecord(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deletingRecord) return;
+    deleteAttendanceRecord(deletingRecord.id);
+    refreshData();
+    setDeletingRecord(null);
+  };
 
   // Find max value for weekly chart scaling
   const maxWeekly = Math.max(...weeklyData.map((d) => d.masuk), 5);
@@ -221,12 +252,13 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
                 <th className="py-3 px-4 text-center">Status</th>
                 <th className="py-3 px-4">Keterangan</th>
                 <th className="py-3 px-4">Jarak GPS</th>
+                <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {recentRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-slate-400">
+                  <td colSpan={8} className="text-center py-8 text-slate-400">
                     Belum ada data absensi tercatat hari ini.
                   </td>
                 </tr>
@@ -235,11 +267,21 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
                   <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <img
-                          src={rec.photo}
-                          alt={rec.employeeName}
-                          className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
-                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPhotoRecord(rec)}
+                          title="Klik untuk melihat & memperbesar foto bukti absen"
+                          className="relative group shrink-0 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95"
+                        >
+                          <img
+                            src={rec.photo}
+                            alt={rec.employeeName}
+                            className="w-9 h-9 rounded-full object-cover group-hover:scale-110 transition duration-200"
+                          />
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white rounded-full">
+                            <ZoomIn className="w-4 h-4" />
+                          </div>
+                        </button>
                         <div>
                           <div className="font-bold text-slate-900 dark:text-white">{rec.employeeName}</div>
                           <div className="text-[10px] text-slate-400 font-mono">NIK: {rec.nik}</div>
@@ -282,6 +324,24 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
                     <td className="py-3 px-4 text-slate-500 font-mono">
                       {rec.distanceFromOfficeMeters}m
                     </td>
+                    <td className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setEditingRecord({ ...rec })}
+                          title="Edit Data Absensi"
+                          className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-800 transition active:scale-95"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingRecord(rec)}
+                          title="Hapus Data Absensi"
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 dark:text-rose-300 rounded-lg border border-rose-200 dark:border-rose-800 transition active:scale-95"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -289,6 +349,164 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
           </table>
         </div>
       </div>
+
+      {/* MODAL EDIT ABSENSI */}
+      {editingRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <img
+                  src={editingRecord.photo}
+                  alt={editingRecord.employeeName}
+                  className="w-10 h-10 rounded-full object-cover border"
+                />
+                <div>
+                  <h3 className="font-extrabold text-slate-900 dark:text-white text-base">Edit Presensi Karyawan</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {editingRecord.employeeName} (NIK: {editingRecord.nik})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingRecord(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Tanggal Absen</label>
+                <input
+                  type="date"
+                  value={editingRecord.date}
+                  onChange={(e) => setEditingRecord({ ...editingRecord, date: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Jam / Waktu Server</label>
+                <input
+                  type="text"
+                  value={editingRecord.serverTime}
+                  onChange={(e) => setEditingRecord({ ...editingRecord, serverTime: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Jenis Presensi</label>
+                <select
+                  value={editingRecord.type}
+                  onChange={(e) =>
+                    setEditingRecord({ ...editingRecord, type: e.target.value as 'masuk' | 'pulang' })
+                  }
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-semibold"
+                >
+                  <option value="masuk">ABSEN MASUK</option>
+                  <option value="pulang">ABSEN PULANG</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Status Kehadiran</label>
+                <select
+                  value={editingRecord.status}
+                  onChange={(e) =>
+                    setEditingRecord({ ...editingRecord, status: e.target.value as 'berhasil' | 'gagal' })
+                  }
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-semibold"
+                >
+                  <option value="berhasil">BERHASIL</option>
+                  <option value="gagal">GAGAL / DITOLAK</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Keterangan / Catatan</label>
+                <input
+                  type="text"
+                  value={editingRecord.keterangan}
+                  onChange={(e) => setEditingRecord({ ...editingRecord, keterangan: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEditingRecord(null)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
+              >
+                <Save className="w-4 h-4" />
+                <span>Simpan Perubahan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL HAPUS ABSENSI CONFIRMATION */}
+      {deletingRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-3 bg-rose-100 dark:bg-rose-950/60 rounded-xl border border-rose-200 dark:border-rose-900/60">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-base">Hapus Record Presensi</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Tindakan ini tidak dapat dibatalkan</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
+              <p className="font-bold text-slate-900 dark:text-white">{deletingRecord.employeeName}</p>
+              <p className="text-slate-500 font-mono">
+                Tanggal: {deletingRecord.date} | Jam: {deletingRecord.serverTime}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingRecord(null)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP FOTO BESAR MODAL */}
+      {selectedPhotoRecord && (
+        <AttendancePhotoModal
+          isOpen={!!selectedPhotoRecord}
+          record={selectedPhotoRecord}
+          onClose={() => setSelectedPhotoRecord(null)}
+        />
+      )}
     </div>
   );
 };
