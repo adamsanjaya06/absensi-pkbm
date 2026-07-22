@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, MapPin, Clock, ShieldCheck, AlertTriangle, RefreshCw, X, CheckCircle2, UserCheck } from 'lucide-react';
+import { Camera, MapPin, Clock, ShieldCheck, AlertTriangle, RefreshCw, X, CheckCircle2, UserCheck, XCircle, RotateCcw } from 'lucide-react';
 import { User, OfficeSettings, AttendanceType, AttendanceRecord } from '../types';
 import { checkGeofenceWithBranches, getAddressFromCoords } from '../lib/geo';
 import { verifyFaceAgainstRegistered, drawFaceHudOverlay } from '../lib/faceAI';
@@ -46,6 +46,25 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     faceMatchScore: number;
     keterangan: string;
   } | null>(null);
+
+  const [failureModal, setFailureModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    reason: string;
+    details?: string;
+  } | null>(null);
+
+  const handleCloseFailureAndRefresh = () => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+    }
+    setFailureModal(null);
+    onClose();
+    setTimeout(() => {
+      window.location.reload();
+    }, 150);
+  };
 
   // Stream to Video element binder
   useEffect(() => {
@@ -318,17 +337,30 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
         }, 1800);
       } else {
         saveAttendanceRecord(newRecord); // save audit log
+
+        let failureReason = 'Verifikasi Absensi Gagal';
+        if (!user.faceRegistered) {
+          failureReason = 'Wajah Belum Terdaftar: Anda harus melakukan pendaftaran biometrik wajah (1x) terlebih dahulu pada menu portal karyawan.';
+        } else if (!faceRes.detected) {
+          failureReason = faceRes.message || 'Wajah Tidak Terdeteksi: Wajah Anda tidak terbaca di area panduan kamera atau foto yang diambil bukan wajah terdaftar.';
+        } else if (faceRes.score < 60) {
+          failureReason = `Verifikasi Biometrik Wajah Ditolak: Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${faceRes.score}% < 60%).`;
+        } else if (!geoRes.isWithinRadius) {
+          failureReason = `Di Luar Radius Kantor: Jarak Anda (${geoRes.distanceMeters}m) berada di luar batas radius kantor (${geoRes.officeRadiusMeters}m).`;
+        }
+
         setVerifyResult({
           status: 'gagal',
-          message: !user.faceRegistered
-            ? 'Absen Ditolak: Wajah Belum Terdaftar!'
-            : !faceRes.detected
-            ? 'Absen Ditolak: Wajah Tidak Terdeteksi Pada Kamera!'
-            : faceRes.score < 60
-            ? 'Absen Ditolak: Biometrik Wajah Tidak Cocok!'
-            : 'Absen Ditolak: Di Luar Radius Kantor!',
+          message: `Absen ${attendanceType === 'masuk' ? 'Masuk' : 'Pulang'} Ditolak!`,
           faceMatchScore: faceRes.score,
-          keterangan,
+          keterangan: failureReason,
+        });
+
+        setFailureModal({
+          isOpen: true,
+          title: `Absen ${attendanceType === 'masuk' ? 'Masuk' : 'Pulang'} Gagal!`,
+          reason: failureReason,
+          details: faceRes.message,
         });
       }
     }, 1200);
@@ -490,6 +522,50 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* POP-UP PERINGATAN ABSENSI GAGAL */}
+      {failureModal?.isOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-rose-200 dark:border-rose-900/60 overflow-hidden space-y-4 p-6 text-center">
+            <div className="w-16 h-16 mx-auto bg-rose-100 dark:bg-rose-950/80 rounded-full flex items-center justify-center text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800 shadow-inner">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1">
+              <div className="inline-block px-3 py-1 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 rounded-full text-[11px] font-bold uppercase tracking-wider">
+                Peringatan Sistem
+              </div>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                {failureModal.title}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Verifikasi sistem tidak memenuhi syarat keamanan absensi.
+              </p>
+            </div>
+
+            <div className="p-4 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800/80 text-left space-y-2">
+              <div className="text-xs font-bold text-rose-900 dark:text-rose-200 flex items-center gap-1.5">
+                <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span>Alasan Kegagalan Absensi:</span>
+              </div>
+              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-semibold pl-5">
+                {failureModal.reason}
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleCloseFailureAndRefresh}
+                className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-rose-600 dark:hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-lg transition active:scale-95 flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Tutup & Kembali ke Halaman Utama</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
