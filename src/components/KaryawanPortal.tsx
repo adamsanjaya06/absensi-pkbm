@@ -39,14 +39,14 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
 }) => {
   const [activeModalType, setActiveModalType] = useState<AttendanceType | null>(null);
   const [isReRegisterModalOpen, setIsReRegisterModalOpen] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getAttendanceRecords());
 
   // Search & Filter state for History
   const [dateSearch, setDateSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
 
   // Filter personal attendance history
-  const allRecords = getAttendanceRecords();
-  const myRecords = allRecords.filter((r) => r.employeeId === currentUser.id);
+  const myRecords = attendanceRecords.filter((r) => r.employeeId === currentUser.id);
 
   const filteredMyRecords = myRecords.filter((r) => {
     const matchDate = !dateSearch || r.date.includes(dateSearch);
@@ -54,7 +54,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
     return matchDate && matchType;
   });
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(new Date());
   const myTodayMasuk = myRecords.find((r) => r.date === today && r.type === 'masuk' && r.status === 'berhasil');
   const myTodayPulang = myRecords.find((r) => r.date === today && r.type === 'pulang' && r.status === 'berhasil');
 
@@ -445,6 +445,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
           onClose={() => setActiveModalType(null)}
           onSuccess={(record) => {
             console.log('Attendance Success:', record);
+            setAttendanceRecords(getAttendanceRecords());
           }}
         />
       )}

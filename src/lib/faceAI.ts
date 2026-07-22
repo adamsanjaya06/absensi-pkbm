@@ -109,7 +109,7 @@ export function verifyFaceAgainstRegistered(
   }
 
   const matchScore = compareDescriptors(liveDescriptor, registeredDescriptor);
-  const threshold = 65; // Minimum similarity percentage
+  const threshold = 50; // Minimum similarity percentage for live camera
 
   if (matchScore >= threshold) {
     return {

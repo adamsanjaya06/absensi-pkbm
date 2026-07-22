@@ -27,17 +27,20 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
   const [hudStatus, setHudStatus] = useState<'scanning' | 'success' | 'failed' | 'idle'>('scanning');
   const [statusMessage, setStatusMessage] = useState<string>('Posisikan wajah Anda tepat di dalam lingkaran.');
 
+  // Stream binder
   useEffect(() => {
-    if (!isOpen) return;
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [stream, isOpen]);
 
+  const startCamera = async () => {
     setCameraError(null);
-    setHudStatus('scanning');
-    setIsScanning(false);
-    setStatusMessage('Posisikan wajah Anda tepat di dalam area panduan.');
-
-    async function startCamera() {
+    try {
+      let mediaStream: MediaStream;
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
+        mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
@@ -45,17 +48,31 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
           },
           audio: false,
         });
-
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          videoRef.current.play();
-        }
-      } catch (err: any) {
-        console.error('Camera access error:', err);
-        setCameraError('Kamera tidak dapat diakses. Mohon izinkan akses kamera di browser Anda.');
+      } catch (e1) {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
       }
+
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch (err: any) {
+      console.error('Camera access error:', err);
+      setCameraError('Kamera tidak dapat diakses. Mohon beri izin akses kamera di browser Anda.');
     }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setCameraError(null);
+    setHudStatus('scanning');
+    setIsScanning(false);
+    setStatusMessage('Posisikan wajah Anda tepat di dalam area panduan.');
 
     startCamera();
 
