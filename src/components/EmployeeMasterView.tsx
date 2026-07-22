@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { User, Division, Position, Role, Gender, EmployeeStatus } from '../types';
 import { getUsers, saveUser, deleteUser, getDivisions, getPositions } from '../lib/storage';
-import { generateSeedFaceDescriptor } from '../lib/faceAI';
 
 export const EmployeeMasterView: React.FC = () => {
   const [users, setUsers] = useState<User[]>(getUsers());
@@ -104,8 +103,8 @@ export const EmployeeMasterView: React.FC = () => {
       status: formStatus,
       role: formRole,
       photoUrl: formPhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-      faceDescriptor: editingUser?.faceDescriptor || generateSeedFaceDescriptor(formNik),
-      faceRegistered: editingUser?.faceRegistered ?? true,
+      faceDescriptor: editingUser ? editingUser.faceDescriptor : [],
+      faceRegistered: editingUser ? editingUser.faceRegistered : false,
       createdAt: editingUser?.createdAt || new Date().toISOString().split('T')[0],
     };
 
@@ -133,12 +132,12 @@ export const EmployeeMasterView: React.FC = () => {
   const handleRegisterFaceAdmin = (user: User) => {
     const updated: User = {
       ...user,
-      faceDescriptor: generateSeedFaceDescriptor(user.nik),
-      faceRegistered: true,
+      faceDescriptor: [],
+      faceRegistered: false,
     };
     saveUser(updated);
     refreshList();
-    alert(`Data Wajah AI untuk karyawan ${user.name} berhasil diperbarui.`);
+    alert(`Status wajah karyawan ${user.name} direset. Karyawan wajib melakukan scan ulang wajah biometrik via kamera.`);
   };
 
   // Filtered List

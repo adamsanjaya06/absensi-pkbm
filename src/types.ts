@@ -115,6 +115,7 @@ export interface FaceDetectionResult {
   score: number;
   message: string;
   descriptor?: number[];
+  faceCount?: number;
 }
 
 export interface GeofenceResult {

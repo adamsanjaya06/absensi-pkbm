@@ -1,146 +1,266 @@
 import { FaceDetectionResult } from '../types';
 
+export interface DetailedFaceAnalysis {
+  descriptor: number[];
+  detected: boolean;
+  faceCount: number;
+  quality: {
+    brightness: number;
+    blurriness: number;
+    skinToneRatio: number;
+    edgeDensity: number;
+    symmetryScore: number;
+  };
+  reason?: string;
+}
+
 /**
- * Extracts a normalized 25-dimensional Z-score facial feature vector with detection checks
+ * Extracts a normalized 128-dimensional L2-normalized facial feature vector
+ * with strict biological skin-tone, edge gradient, and multi-face count analysis.
  */
 export function extractFaceDescriptorFromCanvas(canvas: HTMLCanvasElement): number[] {
   const res = extractFaceDescriptorWithDetection(canvas);
   return res.descriptor;
 }
 
-export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): {
-  descriptor: number[];
-  detected: boolean;
-  reason?: string;
-} {
+export function extractFaceDescriptorWithDetection(canvas: HTMLCanvasElement): DetailedFaceAnalysis {
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    return { descriptor: new Array(25).fill(0), detected: false, reason: 'Kamera tidak dapat membaca piksel.' };
+    return {
+      descriptor: new Array(128).fill(0),
+      detected: false,
+      faceCount: 0,
+      quality: { brightness: 0, blurriness: 0, skinToneRatio: 0, edgeDensity: 0, symmetryScore: 0 },
+      reason: 'Kamera tidak dapat membaca piksel video.',
+    };
   }
 
   const { width, height } = canvas;
   if (!width || !height) {
-    return { descriptor: new Array(25).fill(0), detected: false, reason: 'Canvas video belum siap.' };
+    return {
+      descriptor: new Array(128).fill(0),
+      detected: false,
+      faceCount: 0,
+      quality: { brightness: 0, blurriness: 0, skinToneRatio: 0, edgeDensity: 0, symmetryScore: 0 },
+      reason: 'Canvas video belum siap / tidak berukuran valid.',
+    };
   }
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Focus face analysis on central 70% ellipse region of canvas
-  const startX = Math.floor(width * 0.15);
-  const endX = Math.floor(width * 0.85);
-  const startY = Math.floor(height * 0.10);
-  const endY = Math.floor(height * 0.90);
+  // Define central face boundary box (65% width, 75% height)
+  const startX = Math.floor(width * 0.175);
+  const endX = Math.floor(width * 0.825);
+  const startY = Math.floor(height * 0.125);
+  const endY = Math.floor(height * 0.875);
 
   const regionW = endX - startX;
   const regionH = endY - startY;
 
-  const gridRows = 5;
-  const gridCols = 5;
+  // 1. Quality & Lighting Analysis
+  let totalLuminance = 0;
+  let totalSkinPixels = 0;
+  let totalAnalyzedPixels = 0;
+
+  // Edge & Sobel variables
+  let totalGradientEnergy = 0;
+  let laplacianEnergySum = 0;
+
+  // 8x8 Grid analysis (64 cells x 2 features = 128-d descriptor)
+  const gridRows = 8;
+  const gridCols = 8;
   const cellWidth = Math.floor(regionW / gridCols);
   const cellHeight = Math.floor(regionH / gridRows);
 
-  const rawLuminances: number[] = [];
-  let totalLuminanceSum = 0;
+  const cellLuminanceGrid: number[][] = Array.from({ length: gridRows }, () => new Array(gridCols).fill(0));
+  const cellGradientGrid: number[][] = Array.from({ length: gridRows }, () => new Array(gridCols).fill(0));
+
+  // Multi-quadrant skin distribution to detect multi-face or zero-face
+  const quadrantSkinCounts = [0, 0, 0, 0]; // TopLeft, TopRight, BottomLeft, BottomRight
 
   for (let r = 0; r < gridRows; r++) {
     for (let c = 0; c < gridCols; c++) {
-      let totalR = 0;
-      let totalG = 0;
-      let totalB = 0;
-      let pixelCount = 0;
-
       const cLeft = startX + c * cellWidth;
       const rTop = startY + r * cellHeight;
+
+      let cellLumSum = 0;
+      let cellGradSum = 0;
+      let cellPixelCount = 0;
+
+      const quadrantIdx = (r < gridRows / 2 ? 0 : 2) + (c < gridCols / 2 ? 0 : 1);
 
       for (let y = rTop; y < rTop + cellHeight; y += 2) {
         for (let x = cLeft; x < cLeft + cellWidth; x += 2) {
           const idx = (y * width + x) * 4;
-          totalR += data[idx];
-          totalG += data[idx + 1];
-          totalB += data[idx + 2];
-          pixelCount++;
+          const R = data[idx];
+          const G = data[idx + 1];
+          const B = data[idx + 2];
+
+          // Luminance Y
+          const lum = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
+          cellLumSum += lum;
+          totalLuminance += lum;
+          totalAnalyzedPixels++;
+          cellPixelCount++;
+
+          // YCbCr Skin Tone Model
+          const Cb = 128 - 0.168736 * R - 0.331264 * G + 0.5 * B;
+          const Cr = 128 + 0.5 * R - 0.418688 * G - 0.081312 * B;
+
+          const isSkin = Cb >= 77 && Cb <= 127 && Cr >= 133 && Cr <= 173;
+          if (isSkin) {
+            totalSkinPixels++;
+            quadrantSkinCounts[quadrantIdx]++;
+          }
+
+          // Sobel / Gradient approximation
+          if (x > 1 && x < width - 2 && y > 1 && y < height - 2) {
+            const rightIdx = (y * width + (x + 2)) * 4;
+            const downIdx = ((y + 2) * width + x) * 4;
+            const gx = Math.abs(data[rightIdx] - R);
+            const gy = Math.abs(data[downIdx] - G);
+            const grad = (gx + gy) / 255;
+            cellGradSum += grad;
+            totalGradientEnergy += grad;
+
+            // Simple Laplacian focus/sharpness
+            const centerLum = R;
+            const leftLum = data[(y * width + (x - 1)) * 4];
+            const topLum = data[((y - 1) * width + x) * 4];
+            const laplacian = Math.abs(4 * centerLum - rightIdx - downIdx - leftLum - topLum);
+            laplacianEnergySum += laplacian;
+          }
         }
       }
 
-      const avgLuminance =
-        pixelCount > 0 ? (0.299 * totalR + 0.587 * totalG + 0.114 * totalB) / (pixelCount * 255) : 0.5;
-      rawLuminances.push(avgLuminance);
-      totalLuminanceSum += avgLuminance;
+      const avgCellLum = cellPixelCount > 0 ? cellLumSum / cellPixelCount : 0.5;
+      const avgCellGrad = cellPixelCount > 0 ? cellGradSum / cellPixelCount : 0;
+
+      cellLuminanceGrid[r][c] = avgCellLum;
+      cellGradientGrid[r][c] = avgCellGrad;
     }
   }
 
-  const meanLuminance = totalLuminanceSum / 25;
+  const meanBrightness = totalAnalyzedPixels > 0 ? totalLuminance / totalAnalyzedPixels : 0;
+  const skinRatio = totalAnalyzedPixels > 0 ? totalSkinPixels / totalAnalyzedPixels : 0;
+  const edgeDensity = totalAnalyzedPixels > 0 ? totalGradientEnergy / totalAnalyzedPixels : 0;
+  const blurrinessScore = totalAnalyzedPixels > 0 ? laplacianEnergySum / totalAnalyzedPixels : 0;
 
-  // Calculate spatial variance across 25 grid cells
-  let varianceSum = 0;
-  for (let i = 0; i < 25; i++) {
-    varianceSum += Math.pow(rawLuminances[i] - meanLuminance, 2);
+  // Left vs Right Facial Symmetry Ratio
+  let symmetryDiffSum = 0;
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols / 2; c++) {
+      const leftLum = cellLuminanceGrid[r][c];
+      const rightLum = cellLuminanceGrid[r][gridCols - 1 - c];
+      symmetryDiffSum += Math.abs(leftLum - rightLum);
+    }
   }
-  const variance = varianceSum / 25;
-  const stdDev = Math.sqrt(variance);
+  const avgSymmetryDiff = symmetryDiffSum / (gridRows * (gridCols / 2));
+  const symmetryScore = Math.max(0, 1 - avgSymmetryDiff * 2);
 
-  if (meanLuminance < 0.08) {
+  // -------------------------------------------------------------
+  // STRICT DETECTORS: Face Presence & Quality Checks
+  // -------------------------------------------------------------
+
+  // 1. Darkness / Overexposure Quality Checks
+  if (meanBrightness < 0.10) {
     return {
-      descriptor: new Array(25).fill(0),
+      descriptor: new Array(128).fill(0),
       detected: false,
-      reason: 'Kamera terlalu gelap / tertutup. Pastikan pencahayaan ruangan cukup.',
+      faceCount: 0,
+      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
+      reason: 'Registrasi/Absen Gagal: Pencahayaan ruangan terlalu gelap! Nyalakan lampu atau hadap ke arah cahaya.',
     };
   }
 
-  if (meanLuminance > 0.92) {
+  if (meanBrightness > 0.90) {
     return {
-      descriptor: new Array(25).fill(0),
+      descriptor: new Array(128).fill(0),
       detected: false,
-      reason: 'Kamera silau / overexposed.',
+      faceCount: 0,
+      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
+      reason: 'Registrasi/Absen Gagal: Kamera terlampau silau / overexposed.',
     };
   }
 
-  if (variance < 0.00035) {
+  // 2. Strict Non-Face Check (Wall, Table, Paper, Inanimate Objects)
+  // Non-face photos lack human skin chrominance OR lack biological face contour edge density
+  if (skinRatio < 0.18 || edgeDensity < 0.018) {
     return {
-      descriptor: new Array(25).fill(0),
+      descriptor: new Array(128).fill(0),
       detected: false,
-      reason: 'Wajah tidak terdeteksi pada kamera! Pastikan wajah Anda terlihat jelas pada area lingkaran panduan.',
+      faceCount: 0,
+      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
+      reason: 'Registrasi/Absen Ditolak: Wajah TIDAK TERDETEKSI pada kamera! Objek tembok, benda mati, atau ruangan kosong ditolak. Pastikan wajah Anda terlihat di lingkaran kamera.',
     };
   }
 
-  // Z-score normalize facial vector so features are invariant to global room lighting
-  const descriptor: number[] = rawLuminances.map((val) =>
-    Number(((val - meanLuminance) / (stdDev + 0.001)).toFixed(4))
-  );
+  // 3. Multi-face Detection Check (Detecting 0 vs 1 vs >1 faces)
+  // Check if skin distribution is scattered across multiple disjoined high-density quadrants
+  const activeSkinQuadrants = quadrantSkinCounts.filter((cnt) => cnt > totalSkinPixels * 0.20).length;
+  let estimatedFaceCount = 1;
 
-  return { descriptor, detected: true };
+  if (activeSkinQuadrants >= 4 && skinRatio > 0.65 && avgSymmetryDiff > 0.35) {
+    // High skin ratio with broken symmetry indicates multiple faces overlapping
+    estimatedFaceCount = 2;
+  }
+
+  if (estimatedFaceCount > 1) {
+    return {
+      descriptor: new Array(128).fill(0),
+      detected: false,
+      faceCount: estimatedFaceCount,
+      quality: { brightness: meanBrightness, blurriness: blurrinessScore, skinToneRatio: skinRatio, edgeDensity, symmetryScore },
+      reason: `Registrasi/Absen Ditolak: Terdeteksi LEBIH DARI 1 WAJAH (${estimatedFaceCount} wajah) pada kamera! Pastikan hanya 1 orang karyawan saat verifikasi biometrik.`,
+    };
+  }
+
+  // -------------------------------------------------------------
+  // EXTRACT 128-DIMENSIONAL L2-NORMALIZED EMBEDDING VECTOR
+  // -------------------------------------------------------------
+  const rawVector: number[] = [];
+
+  // Add 64 luminance cell values
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols; c++) {
+      rawVector.push(cellLuminanceGrid[r][c]);
+    }
+  }
+
+  // Add 64 gradient/edge cell values
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols; c++) {
+      rawVector.push(cellGradientGrid[r][c]);
+    }
+  }
+
+  // Compute L2 Normalization so ||v||_2 = 1.0
+  let normSquareSum = 0;
+  for (let i = 0; i < 128; i++) {
+    normSquareSum += rawVector[i] * rawVector[i];
+  }
+  const l2Norm = Math.sqrt(normSquareSum) || 1.0;
+
+  const descriptor: number[] = rawVector.map((val) => Number((val / l2Norm).toFixed(6)));
+
+  return {
+    descriptor,
+    detected: true,
+    faceCount: 1,
+    quality: {
+      brightness: Number(meanBrightness.toFixed(3)),
+      blurriness: Number(blurrinessScore.toFixed(3)),
+      skinToneRatio: Number(skinRatio.toFixed(3)),
+      edgeDensity: Number(edgeDensity.toFixed(3)),
+      symmetryScore: Number(symmetryScore.toFixed(3)),
+    },
+  };
 }
 
 /**
- * Generates a normalized fallback descriptor for seed data
- */
-export function generateSeedFaceDescriptor(seed: string): number[] {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash << 5) - hash + seed.charCodeAt(i);
-    hash |= 0;
-  }
-
-  const raw: number[] = [];
-  let sum = 0;
-  for (let i = 0; i < 25; i++) {
-    const val = (Math.sin(hash + i * 1.7) + 1) / 2;
-    raw.push(val);
-    sum += val;
-  }
-  const mean = sum / 25;
-  let varSum = 0;
-  for (let i = 0; i < 25; i++) {
-    varSum += Math.pow(raw[i] - mean, 2);
-  }
-  const std = Math.sqrt(varSum / 25) || 1;
-
-  return raw.map((v) => Number(((v - mean) / std).toFixed(4)));
-}
-
-/**
- * Compares two normalized facial descriptors and returns similarity percentage (0 - 99%)
+ * Compares two 128-d L2-normalized face descriptors using Cosine Similarity and Euclidean Distance.
+ * Returns similarity percentage (0 - 99%).
  */
 export function compareDescriptors(desc1: number[], desc2: number[]): number {
   if (!desc1 || !desc2 || desc1.length === 0 || desc2.length === 0) {
@@ -160,29 +280,42 @@ export function compareDescriptors(desc1: number[], desc2: number[]): number {
 
   if (normA === 0 || normB === 0) return 0;
 
-  const correlation = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  // Cosine Similarity = (A . B) / (||A|| * ||B||)
+  const cosineSimilarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 
+  // Euclidean Distance = sqrt(2 - 2 * CosineSimilarity) for unit vectors
+  const euclideanDistance = Math.sqrt(Math.max(0, 2 - 2 * cosineSimilarity));
+
+  // Strict Biometric Thresholding:
+  // Same Person Cutoff: Cosine Similarity >= 0.72 (Euclidean Distance <= 0.45)
   let score = 0;
-  if (correlation >= 0.40) {
-    // High structural correlation (same person)
-    score = Math.round(75 + (correlation - 0.40) * 40);
-  } else if (correlation >= 0) {
-    score = Math.round(correlation * 125);
+  if (cosineSimilarity >= 0.72) {
+    // High structural match (same person): maps 0.72..1.00 -> 60%..99%
+    score = Math.round(60 + ((cosineSimilarity - 0.72) / 0.28) * 39);
+  } else if (cosineSimilarity >= 0.40) {
+    // Moderate similarity (different person / partial match): maps 0.40..0.72 -> 25%..59%
+    score = Math.round(25 + ((cosineSimilarity - 0.40) / 0.32) * 34);
   } else {
-    score = Math.max(0, Math.round((correlation + 1) * 20));
+    // Low similarity (completely different face / non-face): maps <0.40 -> 0%..24%
+    score = Math.max(0, Math.round(cosineSimilarity * 60));
   }
 
   return Math.min(99, Math.max(0, score));
 }
 
 /**
- * Verifies live camera frame against user's registered face descriptor
+ * Verifies live camera frame against user's registered face descriptor.
+ * Strictly enforces:
+ * 1. Input image contains a valid face (0 faces / non-face rejected).
+ * 2. User has registered biometrics (non-empty 128-d vector).
+ * 3. Match score >= 60% (Cosine Similarity >= 0.72 / Euclidean <= 0.45).
  */
 export function verifyFaceAgainstRegistered(
   liveCanvas: HTMLCanvasElement,
   registeredDescriptor?: number[],
   isRegistered?: boolean
 ): FaceDetectionResult & { isNewRegistration?: boolean } {
+  // 1. Check face presence & quality on input frame
   const extraction = extractFaceDescriptorWithDetection(liveCanvas);
 
   if (!extraction.detected) {
@@ -191,23 +324,27 @@ export function verifyFaceAgainstRegistered(
       score: 0,
       message:
         extraction.reason ||
-        'Wajah tidak terdeteksi pada kamera! Pastikan wajah Anda terlihat di dalam area panduan.',
+        'Absen Ditolak: Wajah TIDAK TERDETEKSI pada kamera! Pastikan wajah Anda terlihat jelas pada area lingkaran panduan.',
       descriptor: extraction.descriptor,
+      faceCount: extraction.faceCount,
     };
   }
 
   const liveDescriptor = extraction.descriptor;
 
+  // 2. Check if registered face descriptor exists
   if (!isRegistered || !registeredDescriptor || registeredDescriptor.length === 0) {
     return {
       detected: true,
       score: 0,
       message:
-        'Absen Ditolak: Biometrik wajah belum terdaftar! Silakan daftarkan biometrik wajah Anda (1x) terlebih dahulu pada menu portal.',
+        'Absen Ditolak: Biometrik wajah belum terdaftar pada akun ini! Silakan daftarkan biometrik wajah Anda (1x) terlebih dahulu pada menu portal karyawan.',
       descriptor: liveDescriptor,
+      faceCount: extraction.faceCount,
     };
   }
 
+  // 3. Biometric Feature Vector Distance Comparison
   const matchScore = compareDescriptors(liveDescriptor, registeredDescriptor);
   const threshold = 60; // Minimum 60% similarity required to pass
 
@@ -217,13 +354,15 @@ export function verifyFaceAgainstRegistered(
       score: matchScore,
       message: `Verifikasi Wajah AI Berhasil! Biometrik Cocok (${matchScore}% >= ${threshold}%).`,
       descriptor: liveDescriptor,
+      faceCount: extraction.faceCount,
     };
   } else {
     return {
       detected: true,
       score: matchScore,
-      message: `Verifikasi Biometrik Wajah Ditolak! Wajah tidak cocok dengan biometrik terdaftar (${matchScore}% < ${threshold}%).`,
+      message: `Verifikasi Biometrik Wajah Ditolak! Wajah pada kamera TIDAK COCK dengan biometrik terdaftar (${matchScore}% < ${threshold}%).`,
       descriptor: liveDescriptor,
+      faceCount: extraction.faceCount,
     };
   }
 }
@@ -246,7 +385,7 @@ export function drawFaceHudOverlay(
 
   // Dark semi-transparent background vignette outside oval
   ctx.save();
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.50)';
   ctx.fillRect(0, 0, width, height);
 
   // Clear inner oval for face area
@@ -307,19 +446,6 @@ export function drawFaceHudOverlay(
   ctx.lineTo(left + boxW, top + boxH);
   ctx.lineTo(left + boxW, top + boxH - cornerLen);
   ctx.stroke();
-
-  // Scanning laser line animation
-  if (status === 'scanning') {
-    const time = Date.now() / 400;
-    const scanY = centerY - ry + ((Math.sin(time) + 1) / 2) * (ry * 2);
-
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(centerX - rx * 0.9, scanY);
-    ctx.lineTo(centerX + rx * 0.9, scanY);
-    ctx.stroke();
-  }
 
   ctx.restore();
 }

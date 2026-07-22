@@ -66,13 +66,7 @@ export async function seedFirestoreIfEmpty() {
     }
 
     const attSnap = await getDocs(collection(db, COLLECTIONS.ATTENDANCE));
-    if (attSnap.empty) {
-      console.log('Seeding initial attendance records to Firestore...');
-      const initialAtts = getInitialAttendances();
-      for (const a of initialAtts) {
-        await setDoc(doc(db, COLLECTIONS.ATTENDANCE, a.id), a);
-      }
-    }
+    // No mock attendance records seeded - attendance collection starts clean in Firebase
   } catch (err) {
     console.warn('Error during Firestore seeding check:', err);
   }
@@ -87,9 +81,7 @@ export function subscribeUsers(callback: (users: User[]) => void) {
       snapshot.forEach((doc) => {
         users.push(doc.data() as User);
       });
-      if (users.length > 0) {
-        callback(users);
-      }
+      callback(users);
     },
     (err) => console.warn('Users listener error:', err)
   );
@@ -104,9 +96,7 @@ export function subscribeDivisions(callback: (divisions: Division[]) => void) {
       snapshot.forEach((doc) => {
         divs.push(doc.data() as Division);
       });
-      if (divs.length > 0) {
-        callback(divs);
-      }
+      callback(divs);
     },
     (err) => console.warn('Divisions listener error:', err)
   );
@@ -121,9 +111,7 @@ export function subscribePositions(callback: (positions: Position[]) => void) {
       snapshot.forEach((doc) => {
         pos.push(doc.data() as Position);
       });
-      if (pos.length > 0) {
-        callback(pos);
-      }
+      callback(pos);
     },
     (err) => console.warn('Positions listener error:', err)
   );
