@@ -1,0 +1,11 @@
+{
+  "name": "Sistem Absensi Karyawan",
+  "description": "Aplikasi Sistem Absensi Karyawan berbasis PWA dengan AI Face Recognition, Live Camera Verification, Geofencing GPS, dan Rekap Laporan Admin.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

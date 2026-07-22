@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User accounts for employees and admins",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nik": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "gender": { "type": "string", "enum": ["L", "P"] },
+        "divisionId": { "type": "string" },
+        "divisionName": { "type": "string" },
+        "positionId": { "type": "string" },
+        "positionName": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "role": { "type": "string", "enum": ["admin", "karyawan"] },
+        "photoUrl": { "type": "string" },
+        "faceDescriptor": { "type": "array", "items": { "type": "number" } },
+        "faceRegistered": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nik", "name", "role", "status"]
+    },
+    "divisions": {
+      "title": "Divisions",
+      "description": "Master data for organizational divisions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["name", "code"]
+    },
+    "positions": {
+      "title": "Positions",
+      "description": "Master data for job positions and levels",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "level": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["title", "level"]
+    },
+    "offices": {
+      "title": "Offices",
+      "description": "Office headquarters and branch office geofences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "officeName": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "radiusMeters": { "type": "number" },
+        "address": { "type": "string" },
+        "isHeadquarters": { "type": "boolean" },
+        "workStartTime": { "type": "string" },
+        "workEndTime": { "type": "string" },
+        "lateToleranceMinutes": { "type": "number" }
+      },
+      "required": ["officeName", "latitude", "longitude", "radiusMeters"]
+    },
+    "attendance": {
+      "title": "Attendance",
+      "description": "Attendance clock-in and clock-out logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "nik": { "type": "string" },
+        "divisionName": { "type": "string" },
+        "positionName": { "type": "string" },
+        "branchName": { "type": "string" },
+        "type": { "type": "string", "enum": ["masuk", "pulang"] },
+        "date": { "type": "string" },
+        "serverTime": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "photo": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "address": { "type": "string" },
+        "distanceFromOfficeMeters": { "type": "number" },
+        "faceMatchScore": { "type": "number" },
+        "status": { "type": "string", "enum": ["berhasil", "gagal"] },
+        "keterangan": { "type": "string" }
+      },
+      "required": ["employeeId", "type", "date", "status"]
+    }
+  }
+}

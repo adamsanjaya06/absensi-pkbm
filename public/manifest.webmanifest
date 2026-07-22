@@ -1,0 +1,21 @@
+{
+  "short_name": "AbsensiPWA",
+  "name": "Sistem Absensi Karyawan PWA",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=192&h=192&fit=crop",
+      "type": "image/jpeg",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=512&h=512&fit=crop",
+      "type": "image/jpeg",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "portrait"
+}
