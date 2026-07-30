@@ -157,3 +157,63 @@ export function isWorkDay(office: OfficeSettings, dateStr?: string): { allowed: 
     currentDay,
   };
 }
+
+/**
+ * Checks if current time and day are within office operational work days & work hours
+ */
+export function checkOperationalSchedule(office: OfficeSettings, dateStr?: string): {
+  isOperational: boolean;
+  isWorkDayAllowed: boolean;
+  isWithinHours: boolean;
+  currentDay: string;
+  currentTimeFormatted: string;
+  reason?: string;
+} {
+  const currentDay = getJakartaDayName(dateStr);
+  const allowedDays = office.workDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const isWorkDayAllowed = allowedDays.includes(currentDay);
+
+  const now = new Date();
+  const timeFormatter = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const formatted = timeFormatter.format(now).replace('.', ':');
+  const parts = formatted.split(':').map(Number);
+  const currH = parts[0] || 0;
+  const currM = parts[1] || 0;
+  const currentTimeFormatted = `${currH.toString().padStart(2, '0')}:${currM.toString().padStart(2, '0')}`;
+  const currMins = currH * 60 + currM;
+
+  const [startH, startM] = (office.workStartTime || '08:00').split(':').map(Number);
+  const startMins = startH * 60 + startM;
+
+  const [endH, endM] = (office.workEndTime || '17:00').split(':').map(Number);
+  const endMins = endH * 60 + endM;
+
+  let isWithinHours = true;
+  let reason = '';
+
+  if (currMins < Math.max(0, startMins - 120)) {
+    isWithinHours = false;
+    reason = `Belum memasuki jam operasional absensi kantor (${office.workStartTime} WIB).`;
+  } else if (currMins > endMins + 60) {
+    isWithinHours = false;
+    reason = `Telah melewati batas waktu operasional pengisian absensi (${office.workEndTime} WIB).`;
+  }
+
+  const isOperational = isWorkDayAllowed && isWithinHours;
+
+  return {
+    isOperational,
+    isWorkDayAllowed,
+    isWithinHours,
+    currentDay,
+    currentTimeFormatted,
+    reason: !isWorkDayAllowed
+      ? `Hari ${currentDay} merupakan hari libur operasional kantor.`
+      : reason,
+  };
+}

@@ -269,7 +269,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     // Fetch server time for payload
     const st = await getServerTimeRealtime();
 
-    const isFaceValid = user.faceRegistered && faceRes.detected && faceRes.score >= 60;
+    const isFaceValid = user.faceRegistered && faceRes.detected && faceRes.score >= 80;
     const isSuccess = geoRes.isWithinRadius && isFaceValid;
     setHudStatus(isSuccess ? 'success' : 'failed');
 
@@ -292,8 +292,8 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
       keterangan = 'Gagal: Wajah belum terdaftar. Lakukan Registrasi Wajah AI terlebih dahulu di portal.';
     } else if (!faceRes.detected) {
       keterangan = `Gagal: Wajah tidak terdeteksi oleh kamera AI (${faceRes.message})`;
-    } else if (faceRes.score < 60) {
-      keterangan = `Gagal: Verifikasi biometrik wajah ditolak (${faceRes.score}% < 60%)`;
+    } else if (faceRes.score < 80) {
+      keterangan = `Gagal: Verifikasi biometrik wajah ditolak (${faceRes.score}% < 80% - Syarat Minimal 80%)`;
     } else if (!geoRes.isWithinRadius) {
       keterangan = `Gagal: Di luar radius lokasi kantor (${geoRes.distanceMeters}m > ${geoRes.officeRadiusMeters}m)`;
     }
@@ -343,8 +343,8 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
           failureReason = 'Wajah Belum Terdaftar: Anda harus melakukan pendaftaran biometrik wajah (1x) terlebih dahulu pada menu portal karyawan.';
         } else if (!faceRes.detected) {
           failureReason = faceRes.message || 'Wajah Tidak Terdeteksi: Wajah Anda tidak terbaca di area panduan kamera atau foto yang diambil bukan wajah terdaftar.';
-        } else if (faceRes.score < 60) {
-          failureReason = `Verifikasi Biometrik Wajah Ditolak: Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${faceRes.score}% < 60%).`;
+        } else if (faceRes.score < 80) {
+          failureReason = `Verifikasi Biometrik Wajah Ditolak: Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${faceRes.score}% < 80%). Syarat minimal kemiripan adalah 80%.`;
         } else if (!geoRes.isWithinRadius) {
           failureReason = `Di Luar Radius Kantor: Jarak Anda (${geoRes.distanceMeters}m) berada di luar batas radius kantor (${geoRes.officeRadiusMeters}m).`;
         }

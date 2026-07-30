@@ -342,18 +342,17 @@ export function compareDescriptors(desc1: number[], desc2: number[]): number {
 
   const cosineSimilarity = dotProduct;
 
-  // Strict Thresholding:
-  // Same Person Cutoff: Cosine Similarity >= 0.75
+  // Strict Thresholding (Minimal 80% similarity required for registered face verification):
   let score = 0;
-  if (cosineSimilarity >= 0.75) {
-    // High structural match (same person): maps 0.75..1.00 -> 60%..99%
-    score = Math.round(60 + ((cosineSimilarity - 0.75) / 0.25) * 39);
-  } else if (cosineSimilarity >= 0.45) {
-    // Moderate similarity (different person / partial match): maps 0.45..0.75 -> 20%..59%
-    score = Math.round(20 + ((cosineSimilarity - 0.45) / 0.30) * 39);
+  if (cosineSimilarity >= 0.70) {
+    // High structural match (same person): maps 0.70..1.00 -> 80%..99%
+    score = Math.round(80 + ((cosineSimilarity - 0.70) / 0.30) * 19);
+  } else if (cosineSimilarity >= 0.40) {
+    // Partial/different person match: maps 0.40..0.70 -> 30%..79%
+    score = Math.round(30 + ((cosineSimilarity - 0.40) / 0.30) * 49);
   } else {
-    // Low similarity (completely different face / non-face): maps <0.45 -> 0%..19%
-    score = Math.max(0, Math.round(Math.max(0, cosineSimilarity) * 40));
+    // Low similarity: maps <0.40 -> 0%..29%
+    score = Math.max(0, Math.round(Math.max(0, cosineSimilarity) * 70));
   }
 
   return Math.min(99, Math.max(0, score));
@@ -395,7 +394,7 @@ export function verifyFaceAgainstRegistered(
   }
 
   const matchScore = compareDescriptors(liveDescriptor, registeredDescriptor);
-  const threshold = 60; // Minimum 60% similarity required to pass
+  const threshold = 80; // Minimum 80% similarity required to pass
 
   if (matchScore >= threshold) {
     return {
@@ -409,7 +408,7 @@ export function verifyFaceAgainstRegistered(
     return {
       detected: true,
       score: matchScore,
-      message: `Verifikasi Biometrik Wajah Ditolak! Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${matchScore}% < ${threshold}%).`,
+      message: `Verifikasi Biometrik Wajah Ditolak! Wajah pada kamera TIDAK COCOK dengan biometrik terdaftar (${matchScore}% < ${threshold}%). Minimal kemiripan 80%.`,
       descriptor: liveDescriptor,
       faceCount: extraction.faceCount,
     };

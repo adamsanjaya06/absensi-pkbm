@@ -25,7 +25,7 @@ import { getAttendanceRecords, saveUser } from '../lib/storage';
 import { AttendanceCameraModal } from './AttendanceCameraModal';
 import { ReRegisterFaceModal } from './ReRegisterFaceModal';
 import { AttendancePhotoModal } from './AttendancePhotoModal';
-import { isWorkDay } from '../lib/geo';
+import { isWorkDay, checkOperationalSchedule } from '../lib/geo';
 
 interface KaryawanPortalProps {
   currentUser: UserType;
@@ -62,7 +62,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
   const myTodayMasuk = myRecords.find((r) => r.date === today && r.type === 'masuk' && r.status === 'berhasil');
   const myTodayPulang = myRecords.find((r) => r.date === today && r.type === 'pulang' && r.status === 'berhasil');
 
-  const workDayInfo = isWorkDay(office, today);
+  const scheduleInfo = checkOperationalSchedule(office, today);
 
   return (
     <div className="space-y-6">
@@ -110,121 +110,158 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
         </button>
       </div>
 
-      {/* Operational Work Day Notice */}
-      {!workDayInfo.allowed && (
-        <div className="p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-amber-900 dark:text-amber-200 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-          <div>
-            <h4 className="font-bold text-xs">Hari Libur Operasional Perusahaan</h4>
-            <p className="text-xs opacity-90">
-              Hari ini (<span className="font-bold">{workDayInfo.currentDay}</span>) bukan merupakan hari kerja operasional kantor. Pengisian absensi tidak diperbolehkan.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* TAB 1: ABSEN MASUK / PULANG */}
       {(activeTab === 'absen' || !['riwayat', 'profil'].includes(activeTab)) && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Absen Masuk Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-blue-500 flex flex-col justify-between space-y-4">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    <Clock className="w-4 h-4 text-blue-500" />
-                    <span>Absen Masuk Harian</span>
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jadwal Masuk: {office.workStartTime} WIB</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Toleransi keterlambatan {office.lateToleranceMinutes} menit dari jam kantor.
-                  </p>
+          {!scheduleInfo.isOperational ? (
+            /* HARI LIBUR OPERASIONAL ATAU MELEWATI BATAS WAKTU: SEMBUNYIKAN MENU ABSENSI & TAMPILKAN INFORMASI */
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-amber-200 dark:border-amber-900/60 shadow-md space-y-4">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-amber-100 dark:bg-amber-950/80 rounded-2xl text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-800 shrink-0">
+                  <Clock className="w-8 h-8" />
                 </div>
-                <div className="p-2.5 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-lg">
-                  <Camera className="w-5 h-5" />
+                <div className="space-y-1">
+                  <div className="inline-block px-2.5 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 rounded-full text-[10px] font-extrabold uppercase tracking-wider">
+                    {!scheduleInfo.isWorkDayAllowed ? 'Hari Libur Operasional' : 'Di Luar Jam Kerja Operasional'}
+                  </div>
+                  <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">
+                    Menu Absensi Jadwal Masuk & Pulang Ditutup
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    Pengisian absensi hanya dapat dilakukan pada <span className="font-bold text-amber-600 dark:text-amber-400">hari kerja</span> dan <span className="font-bold text-amber-600 dark:text-amber-400">jam kerja operasional</span> sesuai dengan pengaturan hari dan jam kerja yang sudah ditentukan oleh pihak manajemen perusahaan.
+                  </p>
                 </div>
               </div>
 
-              {/* Today Status Indicator */}
-              {myTodayMasuk ? (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <span className="font-bold">Sudah Absen Masuk Hari Ini</span>
-                      <p className="text-[11px] opacity-80">{myTodayMasuk.serverTime} WIB - {myTodayMasuk.keterangan}</p>
+              {/* Detail Pengaturan Operasional Box */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700/60 pb-2">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Hari Kerja Operasional:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {(office.workDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']).join(', ')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700/60 pb-2">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Jam Kerja Operasional:</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400">
+                    {office.workStartTime} WIB s/d {office.workEndTime} WIB (Toleransi {office.lateToleranceMinutes} menit)
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Status Waktu Saat Ini:</span>
+                  <span className="font-bold text-amber-600 dark:text-amber-400">
+                    Hari {scheduleInfo.currentDay}, Pukul {scheduleInfo.currentTimeFormatted} WIB
+                  </span>
+                </div>
+                {scheduleInfo.reason && (
+                  <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-800/60 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>{scheduleInfo.reason}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Absen Masuk Card */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-blue-500 flex flex-col justify-between space-y-4">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                      <Clock className="w-4 h-4 text-blue-500" />
+                      <span>Absen Masuk Harian</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jadwal Masuk: {office.workStartTime} WIB</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Toleransi keterlambatan {office.lateToleranceMinutes} menit dari jam kantor.
+                    </p>
+                  </div>
+                  <div className="p-2.5 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-lg">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                </div>
+
+                {/* Today Status Indicator */}
+                {myTodayMasuk ? (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold">Sudah Absen Masuk Hari Ini</span>
+                        <p className="text-[11px] opacity-80">{myTodayMasuk.serverTime} WIB - {myTodayMasuk.keterangan}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>Belum melakukan Absen Masuk hari ini.</span>
-                </div>
-              )}
-
-              <button
-                onClick={() => setActiveModalType('masuk')}
-                disabled={!!myTodayMasuk}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
-              >
-                <Camera className="w-4 h-4" />
-                <span>{myTodayMasuk ? 'Absen Masuk Selesai' : 'Lakukan Absen Masuk Kamera & GPS'}</span>
-              </button>
-            </div>
-
-            {/* Absen Pulang Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-amber-500 flex flex-col justify-between space-y-4">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    <Clock className="w-4 h-4 text-amber-500" />
-                    <span>Absen Pulang Kerja</span>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>Belum melakukan Absen Masuk hari ini.</span>
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jadwal Pulang: {office.workEndTime} WIB</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Absen jam pulang setelah menyelesaikan jam kerja kantor.
-                  </p>
-                </div>
-                <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 rounded-lg">
-                  <Camera className="w-5 h-5" />
-                </div>
+                )}
+
+                <button
+                  onClick={() => setActiveModalType('masuk')}
+                  disabled={!!myTodayMasuk}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>{myTodayMasuk ? 'Absen Masuk Selesai' : 'Lakukan Absen Masuk Kamera & GPS'}</span>
+                </button>
               </div>
 
-              {/* Today Status Indicator */}
-              {myTodayPulang ? (
-                <div className="p-3 bg-purple-50 dark:bg-purple-950/50 rounded-xl border border-purple-200 dark:border-purple-800 text-xs text-purple-900 dark:text-purple-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
-                    <div>
-                      <span className="font-bold">Sudah Absen Pulang Hari Ini</span>
-                      <p className="text-[11px] opacity-80">{myTodayPulang.serverTime} WIB - {myTodayPulang.keterangan}</p>
+              {/* Absen Pulang Card */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-amber-500 flex flex-col justify-between space-y-4">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                      <Clock className="w-4 h-4 text-amber-500" />
+                      <span>Absen Pulang Kerja</span>
                     </div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jadwal Pulang: {office.workEndTime} WIB</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Absen jam pulang setelah menyelesaikan jam kerja kantor.
+                    </p>
+                  </div>
+                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 rounded-lg">
+                    <Camera className="w-5 h-5" />
                   </div>
                 </div>
-              ) : (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>Belum melakukan Absen Pulang hari ini.</span>
-                </div>
-              )}
 
-              <button
-                onClick={() => setActiveModalType('pulang')}
-                disabled={!myTodayMasuk || !!myTodayPulang}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
-              >
-                <Camera className="w-4 h-4" />
-                <span>
-                  {!myTodayMasuk
-                    ? 'Harap Absen Masuk Dulu'
-                    : myTodayPulang
-                    ? 'Absen Pulang Selesai'
-                    : 'Lakukan Absen Pulang Kamera & GPS'}
-                </span>
-              </button>
+                {/* Today Status Indicator */}
+                {myTodayPulang ? (
+                  <div className="p-3 bg-purple-50 dark:bg-purple-950/50 rounded-xl border border-purple-200 dark:border-purple-800 text-xs text-purple-900 dark:text-purple-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                      <div>
+                        <span className="font-bold">Sudah Absen Pulang Hari Ini</span>
+                        <p className="text-[11px] opacity-80">{myTodayPulang.serverTime} WIB - {myTodayPulang.keterangan}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>Belum melakukan Absen Pulang hari ini.</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setActiveModalType('pulang')}
+                  disabled={!myTodayMasuk || !!myTodayPulang}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>
+                    {!myTodayMasuk
+                      ? 'Harap Absen Masuk Dulu'
+                      : myTodayPulang
+                      ? 'Absen Pulang Selesai'
+                      : 'Lakukan Absen Pulang Kamera & GPS'}
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
