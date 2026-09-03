@@ -9,6 +9,7 @@ import {
   Download,
   AlertTriangle,
   Sparkles,
+  Camera,
 } from 'lucide-react';
 import { AttendanceRecord } from '../types';
 
@@ -75,11 +76,20 @@ export const AttendancePhotoModal: React.FC<AttendancePhotoModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4">
           {/* Main Photo Enlarged View */}
           <div className="relative w-full aspect-[4/3] max-h-[50vh] bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-inner group">
-            <img
-              src={record.photo}
-              alt={record.employeeName}
-              className="w-full h-full object-contain bg-slate-950 transition-transform duration-300 group-hover:scale-105"
-            />
+            {record.photo ? (
+              <img
+                src={record.photo}
+                alt={record.employeeName}
+                className="w-full h-full object-contain bg-slate-950 transition-transform duration-300 group-hover:scale-105"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2 p-8 text-slate-500">
+                <Camera className="w-12 h-12 opacity-30 text-slate-400" />
+                <span className="text-xs font-semibold text-slate-400">
+                  Foto bukti presensi tidak tersedia atau dioptimalkan untuk penyimpanan
+                </span>
+              </div>
+            )}
             {/* Watermark Overlay */}
             <div className="absolute bottom-3 left-3 right-3 p-3 bg-slate-950/70 backdrop-blur-md rounded-xl border border-white/10 text-white flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">

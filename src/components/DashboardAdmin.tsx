@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   UserCheck,
@@ -27,7 +27,9 @@ import {
   getUsers,
   updateAttendanceRecord,
   deleteAttendanceRecord,
+  fetchAttendanceDirectlyFs,
 } from '../lib/storage';
+import { subscribeAttendance } from '../lib/firebaseService';
 import { InteractiveMap } from './InteractiveMap';
 import { AttendancePhotoModal } from './AttendancePhotoModal';
 
@@ -47,13 +49,44 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   const [deletingRecord, setDeletingRecord] = useState<AttendanceRecord | null>(null);
   const [selectedPhotoRecord, setSelectedPhotoRecord] = useState<AttendanceRecord | null>(null);
 
-  const refreshData = () => {
-    setRecords(getAttendanceRecords());
+  const refreshData = async () => {
+    try {
+      const cloudRecs = await fetchAttendanceDirectlyFs();
+      if (cloudRecs && cloudRecs.length > 0) {
+        setRecords(cloudRecs);
+      } else {
+        setRecords(getAttendanceRecords());
+      }
+    } catch {
+      setRecords(getAttendanceRecords());
+    }
   };
 
-  const stats = getDashboardStats();
-  const weeklyData = getWeeklyTrendData();
-  const monthlyData = getMonthlyTrendData();
+  useEffect(() => {
+    refreshData();
+
+    const unsub = subscribeAttendance((newRecs) => {
+      if (newRecs) {
+        setRecords(newRecs);
+      }
+    });
+
+    const handleLocalUpdate = (e: any) => {
+      if (e.detail) {
+        setRecords(e.detail);
+      }
+    };
+    window.addEventListener('absensi_attendance_updated', handleLocalUpdate);
+
+    return () => {
+      unsub();
+      window.removeEventListener('absensi_attendance_updated', handleLocalUpdate);
+    };
+  }, []);
+
+  const stats = getDashboardStats(records);
+  const weeklyData = getWeeklyTrendData(records);
+  const monthlyData = getMonthlyTrendData(records);
   const recentRecords = records.slice(0, 8); // Top 8 recent clock ins/outs
 
   const handleSaveEdit = () => {
@@ -273,11 +306,17 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
                           title="Klik untuk melihat & memperbesar foto bukti absen"
                           className="relative group shrink-0 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95"
                         >
-                          <img
-                            src={rec.photo}
-                            alt={rec.employeeName}
-                            className="w-9 h-9 rounded-full object-cover group-hover:scale-110 transition duration-200"
-                          />
+                          {rec.photo ? (
+                            <img
+                              src={rec.photo}
+                              alt={rec.employeeName}
+                              className="w-9 h-9 rounded-full object-cover group-hover:scale-110 transition duration-200"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-xs border border-slate-200 dark:border-slate-700">
+                              {rec.employeeName ? rec.employeeName.charAt(0).toUpperCase() : 'P'}
+                            </div>
+                          )}
                           <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white rounded-full">
                             <ZoomIn className="w-4 h-4" />
                           </div>
@@ -356,11 +395,17 @@ export const DashboardAdmin: React.FC<DashboardAdminProps> = ({
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <img
-                  src={editingRecord.photo}
-                  alt={editingRecord.employeeName}
-                  className="w-10 h-10 rounded-full object-cover border"
-                />
+                {editingRecord.photo ? (
+                  <img
+                    src={editingRecord.photo}
+                    alt={editingRecord.employeeName}
+                    className="w-10 h-10 rounded-full object-cover border"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-500 flex items-center justify-center font-bold text-sm border border-blue-200 dark:border-blue-800">
+                    {editingRecord.employeeName ? editingRecord.employeeName.charAt(0).toUpperCase() : 'P'}
+                  </div>
+                )}
                 <div>
                   <h3 className="font-extrabold text-slate-900 dark:text-white text-base">Edit Presensi Karyawan</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">

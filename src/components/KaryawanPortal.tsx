@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Camera,
   CheckCircle2,
@@ -19,12 +19,17 @@ import {
   Award,
   Lock,
   ZoomIn,
+  LogIn,
+  LogOut,
+  Layers,
 } from 'lucide-react';
 import { User as UserType, OfficeSettings, AttendanceRecord, AttendanceType } from '../types';
 import { getAttendanceRecords, saveUser } from '../lib/storage';
+import { subscribeAttendance } from '../lib/firebaseService';
 import { AttendanceCameraModal } from './AttendanceCameraModal';
 import { ReRegisterFaceModal } from './ReRegisterFaceModal';
 import { AttendancePhotoModal } from './AttendancePhotoModal';
+import { Pagination } from './Pagination';
 import { isWorkDay, checkOperationalSchedule } from '../lib/geo';
 
 interface KaryawanPortalProps {
@@ -45,18 +50,67 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
   const [selectedPhotoRecord, setSelectedPhotoRecord] = useState<AttendanceRecord | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getAttendanceRecords());
 
+  useEffect(() => {
+    const unsub = subscribeAttendance((recs) => {
+      if (recs) {
+        setAttendanceRecords(recs);
+      }
+    });
+
+    const handleUpdate = (e: any) => {
+      if (e.detail) {
+        setAttendanceRecords(e.detail);
+      }
+    };
+    window.addEventListener('absensi_attendance_updated', handleUpdate);
+
+    return () => {
+      unsub();
+      window.removeEventListener('absensi_attendance_updated', handleUpdate);
+    };
+  }, []);
+
   // Search & Filter state for History
   const [dateSearch, setDateSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
 
+  // Pagination state for personal history - default 50 records per page
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Reset pagination to page 1 on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateSearch, typeFilter]);
+
   // Filter personal attendance history
   const myRecords = attendanceRecords.filter((r) => r.employeeId === currentUser.id);
 
+  const myAllTotalCount = myRecords.length;
+  const myAllMasukCount = myRecords.filter((r) => (r.type || 'masuk').toLowerCase() === 'masuk').length;
+  const myAllPulangCount = myRecords.filter((r) => (r.type || '').toLowerCase() === 'pulang').length;
+
   const filteredMyRecords = myRecords.filter((r) => {
     const matchDate = !dateSearch || r.date.includes(dateSearch);
-    const matchType = typeFilter === 'ALL' || r.type === typeFilter;
+    const recType = (r.type || 'masuk').toLowerCase();
+    const matchType =
+      typeFilter === 'ALL' ||
+      recType === typeFilter ||
+      (typeFilter === 'masuk' && recType.includes('masuk')) ||
+      (typeFilter === 'pulang' && recType.includes('pulang'));
     return matchDate && matchType;
   });
+
+  // Paginated records for Employee
+  const myTotalItems = filteredMyRecords.length;
+  const myTotalPages = Math.max(1, Math.ceil(myTotalItems / pageSize));
+  const safeMyCurrentPage = Math.min(Math.max(1, currentPage), myTotalPages);
+  const myStartIndex = (safeMyCurrentPage - 1) * pageSize;
+  const paginatedMyRecords = filteredMyRecords.slice(myStartIndex, myStartIndex + pageSize);
+
+  const myTotalCount = filteredMyRecords.length;
+  const myMasukCount = filteredMyRecords.filter((r) => (r.type || 'masuk').toLowerCase() === 'masuk').length;
+  const myPulangCount = filteredMyRecords.filter((r) => (r.type || '').toLowerCase() === 'pulang').length;
 
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(new Date());
   const myTodayMasuk = myRecords.find((r) => r.date === today && r.type === 'masuk' && r.status === 'berhasil');
@@ -69,11 +123,17 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
       {/* Employee Greeting & Profile Banner */}
       <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-800 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/10 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
-          <img
-            src={currentUser.photoUrl}
-            alt={currentUser.name}
-            className="w-16 h-16 rounded-2xl object-cover ring-4 ring-white/20 shadow-md"
-          />
+          {currentUser.photoUrl ? (
+            <img
+              src={currentUser.photoUrl}
+              alt={currentUser.name}
+              className="w-16 h-16 rounded-2xl object-cover ring-4 ring-white/20 shadow-md"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-2xl bg-white/20 text-white ring-4 ring-white/20 shadow-md flex items-center justify-center font-bold text-2xl">
+              {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-100 text-[10px] font-extrabold uppercase tracking-wider">
@@ -265,38 +325,141 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
         </div>
       )}
 
-      {/* TAB 2: RIWAYAT ABSENSI SAYA */}
+      {/* TAB 2: REKAP & RIWAYAT ABSENSI SAYA */}
       {(activeTab === 'riwayat' || activeTab === 'absen') && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
-              <History className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <History className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
               <div>
-                <h3 className="font-bold text-slate-900 dark:text-white text-base">Riwayat Absensi Saya</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base">Rekap Absensi Saya</h3>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                    {filteredMyRecords.length} Data
+                  </span>
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Daftar seluruh transaksi absensi masuk dan pulang yang pernah Anda lakukan
+                  Daftar seluruh riwayat transaksi absensi masuk dan pulang yang pernah Anda lakukan
                 </p>
               </div>
             </div>
 
             {/* Filters */}
-            <div className="flex items-center gap-3">
-              <input
-                type="date"
-                value={dateSearch}
-                onChange={(e) => setDateSearch(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
-              />
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Synchronized Type Tabs */}
+              <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  id="filter-my-tab-semua"
+                  onClick={() => setTypeFilter('ALL')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    typeFilter === 'ALL'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Semua ({myAllTotalCount})</span>
+                </button>
+                <button
+                  type="button"
+                  id="filter-my-tab-masuk"
+                  onClick={() => setTypeFilter('masuk')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    typeFilter === 'masuk'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400'
+                  }`}
+                >
+                  <LogIn className="w-3 h-3" />
+                  <span>Masuk ({myAllMasukCount})</span>
+                </button>
+                <button
+                  type="button"
+                  id="filter-my-tab-pulang"
+                  onClick={() => setTypeFilter('pulang')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    typeFilter === 'pulang'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400'
+                  }`}
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span>Pulang ({myAllPulangCount})</span>
+                </button>
+              </div>
 
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
-              >
-                <option value="ALL">Semua Jenis</option>
-                <option value="masuk">Masuk</option>
-                <option value="pulang">Pulang</option>
-              </select>
+              {/* Dropdown Filter Masuk atau Pulang (Synchronized with Tabs) */}
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <label htmlFor="filter-my-type" className="text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  Dropdown:
+                </label>
+                <select
+                  id="filter-my-type"
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                  className={`bg-transparent font-bold text-xs focus:outline-none cursor-pointer ${
+                    typeFilter !== 'ALL'
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-slate-900 dark:text-white'
+                  }`}
+                >
+                  <option value="ALL" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                    Semua Jenis (Masuk / Pulang)
+                  </option>
+                  <option value="masuk" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                    Masuk (Absen Masuk)
+                  </option>
+                  <option value="pulang" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                    Pulang (Absen Pulang)
+                  </option>
+                </select>
+              </div>
+
+              {/* Tanggal */}
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  Tanggal:
+                </span>
+                <input
+                  type="date"
+                  value={dateSearch}
+                  onChange={(e) => setDateSearch(e.target.value)}
+                  className="bg-transparent font-semibold text-xs text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              {/* Reset filter */}
+              {(typeFilter !== 'ALL' || dateSearch) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeFilter('ALL');
+                    setDateSearch('');
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition"
+                  title="Reset Filter"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Mini Summary Badges for Employee's own records */}
+          <div className="grid grid-cols-3 gap-2.5 pt-1">
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60 text-xs">
+              <span className="text-slate-500 dark:text-slate-400 block text-[10px] font-semibold uppercase">Total Riwayat</span>
+              <span className="text-base font-black text-slate-900 dark:text-white">{myTotalCount} Record</span>
+            </div>
+            <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/60 text-xs">
+              <span className="text-blue-700 dark:text-blue-300 block text-[10px] font-semibold uppercase">Absen Masuk</span>
+              <span className="text-base font-black text-blue-600 dark:text-blue-400">{myMasukCount} Record</span>
+            </div>
+            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-900/60 text-xs">
+              <span className="text-amber-700 dark:text-amber-300 block text-[10px] font-semibold uppercase">Absen Pulang</span>
+              <span className="text-base font-black text-amber-600 dark:text-amber-400">{myPulangCount} Record</span>
             </div>
           </div>
 
@@ -321,7 +484,7 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredMyRecords.map((rec) => (
+                  paginatedMyRecords.map((rec) => (
                     <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                       <td className="py-3 px-4">
                         <button
@@ -329,11 +492,17 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
                           title="Klik untuk memperbesar foto bukti absen"
                           className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-xs block focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                          <img
-                            src={rec.photo}
-                            alt={rec.employeeName}
-                            className="w-10 h-10 object-cover group-hover:scale-110 transition duration-200"
-                          />
+                          {rec.photo ? (
+                            <img
+                              src={rec.photo}
+                              alt={rec.employeeName}
+                              className="w-10 h-10 object-cover group-hover:scale-110 transition duration-200"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-xs">
+                              {rec.employeeName ? rec.employeeName.charAt(0).toUpperCase() : 'P'}
+                            </div>
+                          )}
                           <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
                             <ZoomIn className="w-4 h-4" />
                           </div>
@@ -381,6 +550,16 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Menu - 50 data per halaman */}
+          <Pagination
+            currentPage={safeMyCurrentPage}
+            totalItems={filteredMyRecords.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[25, 50, 100, 200]}
+          />
         </div>
       )}
 
@@ -400,11 +579,17 @@ export const KaryawanPortal: React.FC<KaryawanPortalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Left Card: Photo & Face Status */}
             <div className="p-5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-center space-y-4">
-              <img
-                src={currentUser.photoUrl}
-                alt={currentUser.name}
-                className="w-28 h-28 mx-auto rounded-full object-cover ring-4 ring-blue-500/20 shadow-md"
-              />
+              {currentUser.photoUrl ? (
+                <img
+                  src={currentUser.photoUrl}
+                  alt={currentUser.name}
+                  className="w-28 h-28 mx-auto rounded-full object-cover ring-4 ring-blue-500/20 shadow-md"
+                />
+              ) : (
+                <div className="w-28 h-28 mx-auto rounded-full bg-blue-500/20 text-blue-500 ring-4 ring-blue-500/20 shadow-md flex items-center justify-center font-bold text-3xl">
+                  {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+                </div>
+              )}
               <div>
                 <h4 className="font-extrabold text-slate-900 dark:text-white text-base">{currentUser.name}</h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">NIK: {currentUser.nik}</p>

@@ -4,6 +4,7 @@ import { User, OfficeSettings, AttendanceType, AttendanceRecord } from '../types
 import { checkGeofenceWithBranches, getAddressFromCoords } from '../lib/geo';
 import { verifyFaceAgainstRegistered, drawFaceHudOverlay } from '../lib/faceAI';
 import { getServerTimeRealtime, saveAttendanceRecord, saveUser } from '../lib/storage';
+import { compressCanvasToTarget } from '../lib/imageCompressor';
 
 interface AttendanceCameraModalProps {
   user: User;
@@ -39,6 +40,7 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
   const [isWithinRadius, setIsWithinRadius] = useState<boolean>(false);
 
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [compressedSizeKb, setCompressedSizeKb] = useState<number | null>(null);
   const [hudStatus, setHudStatus] = useState<'scanning' | 'success' | 'failed' | 'idle'>('scanning');
   const [verifyResult, setVerifyResult] = useState<{
     status: 'berhasil' | 'gagal';
@@ -249,16 +251,24 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
     setVerifyResult(null);
     setHudStatus('scanning');
 
-    // Snapshot video frame to hidden canvas
+    // Snapshot video frame to hidden canvas, scaled to max 480px width for fast Firestore storage
     const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
+    const origW = videoRef.current.videoWidth || 640;
+    const origH = videoRef.current.videoHeight || 480;
+    const targetW = Math.min(480, origW);
+    const targetH = Math.round((origH / origW) * targetW);
+    canvas.width = targetW;
+    canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    ctx.drawImage(videoRef.current, 0, 0, targetW, targetH);
+    
+    // Auto-compress photo strictly under 1 MB (< 800 KB target, preserving high clarity)
+    const compressed = compressCanvasToTarget(canvas, 800 * 1024);
+    const photoDataUrl = compressed.dataUrl;
+    setCompressedSizeKb(compressed.sizeKb);
 
     // AI Face Verification against employee registered descriptor
     const faceRes = verifyFaceAgainstRegistered(canvas, user.faceDescriptor, user.faceRegistered);
@@ -300,31 +310,35 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
 
     const newRecord: AttendanceRecord = {
       id: 'att-' + Date.now(),
-      employeeId: user.id,
-      employeeName: user.name,
-      nik: user.nik,
-      divisionName: user.divisionName,
-      positionName: user.positionName,
-      branchName: geoRes.branchName || office.officeName,
+      employeeId: user.id || '',
+      employeeName: user.name || 'Karyawan',
+      nik: user.nik || '',
+      divisionName: user.divisionName || '-',
+      positionName: user.positionName || '-',
+      branchName: geoRes.branchName || office.officeName || 'Kantor Pusat',
       type: attendanceType,
       date: st.serverDate,
       serverTime: st.serverTime,
       timestamp: Date.now(),
       photo: photoDataUrl,
-      latitude: currentLocation.lat,
-      longitude: currentLocation.lng,
-      address,
-      distanceFromOfficeMeters: geoRes.distanceMeters,
-      faceMatchScore: faceRes.score,
+      latitude: currentLocation.lat || office.latitude,
+      longitude: currentLocation.lng || office.longitude,
+      address: address || 'Lokasi Terverifikasi',
+      distanceFromOfficeMeters: Math.round(geoRes.distanceMeters || 0),
+      faceMatchScore: faceRes.score || 0,
       status: isSuccess ? 'berhasil' : 'gagal',
       keterangan,
     };
+
+    // Save locally and sync to Firestore Cloud
+    saveAttendanceRecord(newRecord).then((res) => {
+      console.log('Attendance synced to Firestore Cloud:', res.cloudSynced ? 'Success' : res.error);
+    });
 
     setTimeout(() => {
       setIsVerifying(false);
 
       if (isSuccess) {
-        saveAttendanceRecord(newRecord);
         setVerifyResult({
           status: 'berhasil',
           message: `Absen ${attendanceType === 'masuk' ? 'Masuk' : 'Pulang'} Berhasil Dicatat!`,
@@ -336,7 +350,6 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
           handleCloseModal();
         }, 1800);
       } else {
-        saveAttendanceRecord(newRecord); // save audit log
 
         let failureReason = 'Verifikasi Absensi Gagal';
         if (!user.faceRegistered) {
@@ -480,8 +493,13 @@ export const AttendanceCameraModal: React.FC<AttendanceCameraModalProps> = ({
               <div>
                 <h4 className="font-bold text-sm">{verifyResult.message}</h4>
                 <p className="text-xs mt-0.5 opacity-90">{verifyResult.keterangan}</p>
-                <div className="text-[11px] font-mono mt-1 opacity-80">
-                  Skor Kecocokan Wajah: {verifyResult.faceMatchScore}%
+                <div className="text-[11px] font-mono mt-1 opacity-80 flex items-center gap-3">
+                  <span>Skor Kecocokan Wajah: {verifyResult.faceMatchScore}%</span>
+                  {compressedSizeKb !== null && (
+                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded text-[10px]">
+                      Foto Terkonpresi: {compressedSizeKb} KB (&lt; 1 MB)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

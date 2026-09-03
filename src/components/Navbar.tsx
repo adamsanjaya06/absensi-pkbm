@@ -113,11 +113,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* User Profile Info Card */}
             <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200 dark:border-slate-800">
-              <img
-                src={currentUser.photoUrl}
-                alt={currentUser.name}
-                className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/30"
-              />
+              {currentUser.photoUrl ? (
+                <img
+                  src={currentUser.photoUrl}
+                  alt={currentUser.name}
+                  className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/30"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-blue-500/20 text-blue-500 ring-2 ring-blue-500/30 flex items-center justify-center font-bold text-xs">
+                  {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+                </div>
+              )}
               <div className="hidden lg:block text-left">
                 <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
                   {currentUser.name}

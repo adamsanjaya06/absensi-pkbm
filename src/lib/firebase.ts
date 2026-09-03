@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
 const config = {
@@ -15,10 +15,16 @@ const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || defaultFirebaseC
 
 const app = getApps().length === 0 ? initializeApp(config) : getApps()[0];
 
-// Initialize Firestore with specific database ID if provided
-export const db: Firestore = databaseId
-  ? getFirestore(app, databaseId)
-  : getFirestore(app);
+// Initialize Firestore with ignoreUndefinedProperties to prevent setDoc crashes
+let firestoreInstance: Firestore;
+try {
+  firestoreInstance = databaseId
+    ? initializeFirestore(app, { ignoreUndefinedProperties: true }, databaseId)
+    : initializeFirestore(app, { ignoreUndefinedProperties: true });
+} catch (e) {
+  firestoreInstance = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+}
 
+export const db: Firestore = firestoreInstance;
 export default app;
 

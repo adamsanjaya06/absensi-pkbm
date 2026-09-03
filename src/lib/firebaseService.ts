@@ -15,6 +15,7 @@ import {
   Position,
   OfficeSettings,
   AttendanceRecord,
+  RolePermissionsConfig,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -30,7 +31,18 @@ const COLLECTIONS = {
   POSITIONS: 'positions',
   OFFICE: 'offices',
   ATTENDANCE: 'attendance',
+  SYSTEM_CONFIG: 'system_config',
 };
+
+// Helper to sanitize undefined values before writing to Firestore
+function sanitizeFirestorePayload<T>(data: T): T {
+  return JSON.parse(
+    JSON.stringify(data, (_, value) => {
+      if (value === undefined) return null;
+      return value;
+    })
+  );
+}
 
 // Seed Firestore if empty
 export async function seedFirestoreIfEmpty() {
@@ -39,7 +51,7 @@ export async function seedFirestoreIfEmpty() {
     if (usersSnap.empty) {
       console.log('Seeding initial users to Firestore...');
       for (const u of INITIAL_USERS) {
-        await setDoc(doc(db, COLLECTIONS.USERS, u.id), u);
+        await setDoc(doc(db, COLLECTIONS.USERS, u.id), sanitizeFirestorePayload(u));
       }
     }
 
@@ -47,7 +59,7 @@ export async function seedFirestoreIfEmpty() {
     if (divsSnap.empty) {
       console.log('Seeding initial divisions to Firestore...');
       for (const d of INITIAL_DIVISIONS) {
-        await setDoc(doc(db, COLLECTIONS.DIVISIONS, d.id), d);
+        await setDoc(doc(db, COLLECTIONS.DIVISIONS, d.id), sanitizeFirestorePayload(d));
       }
     }
 
@@ -55,18 +67,15 @@ export async function seedFirestoreIfEmpty() {
     if (posSnap.empty) {
       console.log('Seeding initial positions to Firestore...');
       for (const p of INITIAL_POSITIONS) {
-        await setDoc(doc(db, COLLECTIONS.POSITIONS, p.id), p);
+        await setDoc(doc(db, COLLECTIONS.POSITIONS, p.id), sanitizeFirestorePayload(p));
       }
     }
 
     const officeSnap = await getDocs(collection(db, COLLECTIONS.OFFICE));
     if (officeSnap.empty) {
       console.log('Seeding initial office settings to Firestore...');
-      await setDoc(doc(db, COLLECTIONS.OFFICE, 'main_config'), DEFAULT_OFFICE_SETTINGS);
+      await setDoc(doc(db, COLLECTIONS.OFFICE, 'main_config'), sanitizeFirestorePayload(DEFAULT_OFFICE_SETTINGS));
     }
-
-    const attSnap = await getDocs(collection(db, COLLECTIONS.ATTENDANCE));
-    // No mock attendance records seeded - attendance collection starts clean in Firebase
   } catch (err) {
     console.warn('Error during Firestore seeding check:', err);
   }
@@ -130,43 +139,85 @@ export function subscribeOfficeSettings(callback: (office: OfficeSettings) => vo
   );
 }
 
-// Subscribe Attendance Records
-export function subscribeAttendance(callback: (records: AttendanceRecord[]) => void) {
-  const q = query(collection(db, COLLECTIONS.ATTENDANCE), orderBy('timestamp', 'desc'));
+// Subscribe Role Permissions Config
+export function subscribeRolePermissions(callback: (config: RolePermissionsConfig) => void) {
   return onSnapshot(
-    q,
+    doc(db, COLLECTIONS.SYSTEM_CONFIG, 'role_permissions'),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.data() as RolePermissionsConfig);
+      }
+    },
+    (err) => console.warn('Role permissions listener error:', err)
+  );
+}
+
+// Fetch Attendance Directly from Firestore
+export async function fetchAttendanceDirectlyFs(): Promise<AttendanceRecord[]> {
+  try {
+    const snap = await getDocs(collection(db, COLLECTIONS.ATTENDANCE));
+    const recs: AttendanceRecord[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as AttendanceRecord;
+      recs.push({
+        ...data,
+        id: data.id || docSnap.id,
+      });
+    });
+    recs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return recs;
+  } catch (err) {
+    console.error('Error fetching attendance directly from Firestore:', err);
+    return [];
+  }
+}
+
+// Check Firestore Health & Connectivity
+export async function checkFirestoreHealth(): Promise<{
+  connected: boolean;
+  totalAttendance: number;
+  totalUsers: number;
+  error?: string;
+}> {
+  try {
+    const [attSnap, usersSnap] = await Promise.all([
+      getDocs(collection(db, COLLECTIONS.ATTENDANCE)),
+      getDocs(collection(db, COLLECTIONS.USERS)),
+    ]);
+    return {
+      connected: true,
+      totalAttendance: attSnap.size,
+      totalUsers: usersSnap.size,
+    };
+  } catch (err: any) {
+    return {
+      connected: false,
+      totalAttendance: 0,
+      totalUsers: 0,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+// Subscribe Attendance Records (Realtime across all users)
+export function subscribeAttendance(callback: (records: AttendanceRecord[]) => void) {
+  return onSnapshot(
+    collection(db, COLLECTIONS.ATTENDANCE),
     (snapshot) => {
       const recs: AttendanceRecord[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as AttendanceRecord;
-        const numPart = (data.id || '').replace('att-', '');
-        const ts = Number(numPart);
-        // Clean up legacy mock data with non-timestamp IDs (e.g. att-1, att-2, etc)
-        if (!isNaN(ts) && ts > 1700000000000) {
-          recs.push(data);
-        } else {
-          deleteDoc(doc(db, COLLECTIONS.ATTENDANCE, docSnap.id)).catch(() => {});
-        }
+        recs.push({
+          ...data,
+          id: data.id || docSnap.id,
+        });
       });
+      // Sort newest first in memory without requiring composite cloud indexes
+      recs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       callback(recs);
     },
     (err) => {
-      // Fallback without ordering if index is building
-      return onSnapshot(collection(db, COLLECTIONS.ATTENDANCE), (snapshot) => {
-        const recs: AttendanceRecord[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as AttendanceRecord;
-          const numPart = (data.id || '').replace('att-', '');
-          const ts = Number(numPart);
-          if (!isNaN(ts) && ts > 1700000000000) {
-            recs.push(data);
-          } else {
-            deleteDoc(doc(db, COLLECTIONS.ATTENDANCE, docSnap.id)).catch(() => {});
-          }
-        });
-        recs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        callback(recs);
-      });
+      console.warn('Attendance collection listener error:', err);
     }
   );
 }
@@ -174,7 +225,7 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
 // Mutation functions
 export async function saveUserFs(user: User) {
   try {
-    await setDoc(doc(db, COLLECTIONS.USERS, user.id), user, { merge: true });
+    await setDoc(doc(db, COLLECTIONS.USERS, user.id), sanitizeFirestorePayload(user), { merge: true });
   } catch (e) {
     console.error('Error saving user to Firestore:', e);
   }
@@ -190,7 +241,7 @@ export async function deleteUserFs(userId: string) {
 
 export async function saveDivisionFs(division: Division) {
   try {
-    await setDoc(doc(db, COLLECTIONS.DIVISIONS, division.id), division, { merge: true });
+    await setDoc(doc(db, COLLECTIONS.DIVISIONS, division.id), sanitizeFirestorePayload(division), { merge: true });
   } catch (e) {
     console.error('Error saving division to Firestore:', e);
   }
@@ -206,7 +257,7 @@ export async function deleteDivisionFs(divisionId: string) {
 
 export async function savePositionFs(position: Position) {
   try {
-    await setDoc(doc(db, COLLECTIONS.POSITIONS, position.id), position, { merge: true });
+    await setDoc(doc(db, COLLECTIONS.POSITIONS, position.id), sanitizeFirestorePayload(position), { merge: true });
   } catch (e) {
     console.error('Error saving position to Firestore:', e);
   }
@@ -222,17 +273,21 @@ export async function deletePositionFs(positionId: string) {
 
 export async function saveOfficeSettingsFs(office: OfficeSettings) {
   try {
-    await setDoc(doc(db, COLLECTIONS.OFFICE, 'main_config'), office, { merge: true });
+    await setDoc(doc(db, COLLECTIONS.OFFICE, 'main_config'), sanitizeFirestorePayload(office), { merge: true });
   } catch (e) {
     console.error('Error saving office settings to Firestore:', e);
   }
 }
 
-export async function saveAttendanceFs(record: AttendanceRecord) {
+export async function saveAttendanceFs(record: AttendanceRecord): Promise<{ success: boolean; error?: string }> {
   try {
-    await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), record);
-  } catch (e) {
-    console.error('Error saving attendance to Firestore:', e);
+    const payload = sanitizeFirestorePayload(record);
+    await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), payload, { merge: true });
+    console.log('[Firestore] Attendance saved successfully:', record.id, record.employeeName, record.type);
+    return { success: true };
+  } catch (e: any) {
+    console.error('[Firestore] Error saving attendance to Firestore:', e);
+    return { success: false, error: e?.message || String(e) };
   }
 }
 
@@ -243,4 +298,14 @@ export async function deleteAttendanceFs(attendanceId: string) {
     console.error('Error deleting attendance from Firestore:', e);
   }
 }
+
+export async function saveRolePermissionsFs(config: RolePermissionsConfig): Promise<void> {
+  try {
+    await setDoc(doc(db, COLLECTIONS.SYSTEM_CONFIG, 'role_permissions'), sanitizeFirestorePayload(config), { merge: true });
+    console.log('[Firestore] Role permissions saved successfully');
+  } catch (e) {
+    console.error('Error saving role permissions to Firestore:', e);
+  }
+}
+
 

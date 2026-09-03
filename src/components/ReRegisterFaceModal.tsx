@@ -3,6 +3,7 @@ import { Camera, ShieldCheck, RefreshCw, X, CheckCircle2, AlertCircle, Lock, Eye
 import { User as UserType } from '../types';
 import { extractFaceDescriptorWithDetection, drawFaceHudOverlay, DetailedFaceAnalysis } from '../lib/faceAI';
 import { saveUser } from '../lib/storage';
+import { compressCanvasToTarget } from '../lib/imageCompressor';
 
 interface ReRegisterFaceModalProps {
   isOpen: boolean;
@@ -140,7 +141,8 @@ export const ReRegisterFaceModal: React.FC<ReRegisterFaceModalProps> = ({
 
       if (ctx && videoRef.current) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const photoDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+        const compressed = compressCanvasToTarget(canvas, 800 * 1024);
+        const photoDataUrl = compressed.dataUrl;
 
         // Extract 128-dimensional high-precision facial feature vector
         const analysis = extractFaceDescriptorWithDetection(canvas);

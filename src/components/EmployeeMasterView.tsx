@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   UserPlus,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { User, Division, Position, Role, Gender, EmployeeStatus } from '../types';
 import { getUsers, saveUser, deleteUser, getDivisions, getPositions } from '../lib/storage';
+import { subscribeUsers } from '../lib/firebaseService';
 
 export const EmployeeMasterView: React.FC = () => {
   const [users, setUsers] = useState<User[]>(getUsers());
@@ -45,6 +46,26 @@ export const EmployeeMasterView: React.FC = () => {
   const refreshList = () => {
     setUsers(getUsers());
   };
+
+  useEffect(() => {
+    const unsub = subscribeUsers((newUsers) => {
+      if (newUsers && newUsers.length > 0) {
+        setUsers(newUsers);
+      }
+    });
+
+    const handleUpdate = (e: any) => {
+      if (e.detail) {
+        setUsers(e.detail);
+      }
+    };
+    window.addEventListener('absensi_users_updated', handleUpdate);
+
+    return () => {
+      unsub();
+      window.removeEventListener('absensi_users_updated', handleUpdate);
+    };
+  }, []);
 
   const handleOpenAddModal = () => {
     setEditingUser(null);
@@ -242,11 +263,17 @@ export const EmployeeMasterView: React.FC = () => {
                   <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <img
-                          src={u.photoUrl}
-                          alt={u.name}
-                          className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
-                        />
+                        {u.photoUrl ? (
+                          <img
+                            src={u.photoUrl}
+                            alt={u.name}
+                            className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs ring-1 ring-slate-200 dark:ring-slate-700">
+                            {u.name ? u.name.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                        )}
                         <div>
                           <div className="font-bold text-slate-900 dark:text-white">{u.name}</div>
                           <div className="text-[10px] text-slate-400">
